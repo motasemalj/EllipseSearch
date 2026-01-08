@@ -12,6 +12,7 @@ import {
   ExternalLink,
   GitCompareArrows,
   ListChecks,
+  Search,
 } from "lucide-react";
 import { StatRow } from "@/components/ui/metric-card";
 import { VisibilityGauge } from "@/components/ui/visibility-gauge";
