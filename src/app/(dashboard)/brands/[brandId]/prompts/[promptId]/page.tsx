@@ -5,10 +5,6 @@ import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { 
   ArrowLeft, 
-  Bot,
-  Search,
-  Sparkles,
-  Zap,
   Eye,
   EyeOff,
   Clock,
@@ -46,7 +42,7 @@ import {
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
 import { VisibilityGauge } from "@/components/ui/visibility-gauge";
-import { EngineBadge } from "@/components/ui/engine-badge";
+import { EngineBadge, ChatGPTIcon, PerplexityIcon, GeminiIcon, GrokIcon } from "@/components/ui/engine-badge";
 import { BrandFavicon } from "@/components/ui/brand-favicon";
 import { HallucinationWatchdogSection } from "@/components/brands/hallucination-watchdog-section";
 import { SentimentAnalysisCard } from "@/components/brands/sentiment-analysis-card";
@@ -60,10 +56,10 @@ interface PromptPageProps {
 }
 
 const engineConfig: Record<SupportedEngine, { name: string; icon: React.ReactNode; color: string }> = {
-  chatgpt: { name: "ChatGPT", icon: <Bot className="w-4 h-4" />, color: "text-emerald-500" },
-  perplexity: { name: "Perplexity", icon: <Search className="w-4 h-4" />, color: "text-purple-500" },
-  gemini: { name: "Gemini", icon: <Sparkles className="w-4 h-4" />, color: "text-blue-500" },
-  grok: { name: "Grok", icon: <Zap className="w-4 h-4" />, color: "text-gray-500" },
+  chatgpt: { name: "ChatGPT", icon: <ChatGPTIcon className="w-4 h-4" />, color: "text-[#10A37F]" },
+  perplexity: { name: "Perplexity", icon: <PerplexityIcon className="w-4 h-4" />, color: "text-[#20808D]" },
+  gemini: { name: "Gemini", icon: <GeminiIcon className="w-4 h-4" />, color: "text-[#8E75B2]" },
+  grok: { name: "Grok", icon: <GrokIcon className="w-4 h-4" />, color: "text-foreground" },
 };
 
 // Helper functions for converting winning_sources to CitationAuthority

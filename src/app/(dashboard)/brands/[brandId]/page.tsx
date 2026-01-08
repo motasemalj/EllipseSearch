@@ -11,15 +11,11 @@ import {
   MapPin,
   ExternalLink,
   GitCompareArrows,
-  Bot,
-  Search,
-  Sparkles,
-  Zap,
   ListChecks,
 } from "lucide-react";
 import { StatRow } from "@/components/ui/metric-card";
 import { VisibilityGauge } from "@/components/ui/visibility-gauge";
-import { EngineCard } from "@/components/ui/engine-badge";
+import { EngineCard, ChatGPTIcon, PerplexityIcon, GeminiIcon, GrokIcon } from "@/components/ui/engine-badge";
 import { ScoreBar } from "@/components/ui/score-radar";
 import { BrandFavicon } from "@/components/ui/brand-favicon";
 import { SupportedEngine } from "@/types";
@@ -59,10 +55,10 @@ export default async function BrandPage({ params }: BrandPageProps) {
   
   const engines: SupportedEngine[] = ["chatgpt", "perplexity", "gemini", "grok"];
   const engineIcons: Record<SupportedEngine, React.ReactNode> = {
-    chatgpt: <Bot className="w-4 h-4" />,
-    perplexity: <Search className="w-4 h-4" />,
-    gemini: <Sparkles className="w-4 h-4" />,
-    grok: <Zap className="w-4 h-4" />,
+    chatgpt: <ChatGPTIcon className="w-4 h-4" />,
+    perplexity: <PerplexityIcon className="w-4 h-4" />,
+    gemini: <GeminiIcon className="w-4 h-4" />,
+    grok: <GrokIcon className="w-4 h-4" />,
   };
 
   return (

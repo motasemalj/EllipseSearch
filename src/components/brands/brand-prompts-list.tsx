@@ -9,9 +9,6 @@ import {
   Search, 
   Eye, 
   Loader2,
-  Bot,
-  Sparkles,
-  Zap,
   ChevronRight,
   TrendingUp,
   TrendingDown,
@@ -26,6 +23,7 @@ import {
   Globe,
   ArrowUp,
 } from "lucide-react";
+import { ChatGPTIcon, PerplexityIcon, GeminiIcon, GrokIcon } from "@/components/ui/engine-badge";
 import {
   Dialog,
   DialogContent,
@@ -56,10 +54,10 @@ interface BrandPromptsListProps {
 }
 
 const engines: { id: SupportedEngine; name: string; icon: React.ReactNode }[] = [
-  { id: "chatgpt", name: "ChatGPT", icon: <Bot className="w-4 h-4" /> },
-  { id: "perplexity", name: "Perplexity", icon: <Search className="w-4 h-4" /> },
-  { id: "gemini", name: "Gemini", icon: <Sparkles className="w-4 h-4" /> },
-  { id: "grok", name: "Grok", icon: <Zap className="w-4 h-4" /> },
+  { id: "chatgpt", name: "ChatGPT", icon: <ChatGPTIcon className="w-4 h-4" /> },
+  { id: "perplexity", name: "Perplexity", icon: <PerplexityIcon className="w-4 h-4" /> },
+  { id: "gemini", name: "Gemini", icon: <GeminiIcon className="w-4 h-4" /> },
+  { id: "grok", name: "Grok", icon: <GrokIcon className="w-4 h-4" /> },
 ];
 
 export function BrandPromptsList({ brandId, prompts }: BrandPromptsListProps) {

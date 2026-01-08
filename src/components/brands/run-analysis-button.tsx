@@ -17,10 +17,6 @@ import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { 
   Play, 
   Loader2, 
-  Bot, 
-  Search, 
-  Sparkles, 
-  Zap, 
   Info, 
   ShieldAlert, 
   Lock, 
@@ -29,6 +25,7 @@ import {
   AlertTriangle,
   Globe,
 } from "lucide-react";
+import { ChatGPTIcon, PerplexityIcon, GeminiIcon, GrokIcon } from "@/components/ui/engine-badge";
 import { toast } from "sonner";
 import { SupportedEngine, BillingTier, TIER_LIMITS, SupportedRegion, REGIONS } from "@/types";
 import { createClient } from "@/lib/supabase/client";
@@ -40,10 +37,10 @@ interface RunAnalysisButtonProps {
 }
 
 const engines: { id: SupportedEngine; name: string; icon: React.ReactNode; description: string }[] = [
-  { id: "chatgpt", name: "ChatGPT", icon: <Bot className="w-4 h-4" />, description: "OpenAI's ChatGPT" },
-  { id: "perplexity", name: "Perplexity", icon: <Search className="w-4 h-4" />, description: "Real-time search" },
-  { id: "gemini", name: "Gemini", icon: <Sparkles className="w-4 h-4" />, description: "Google's AI" },
-  { id: "grok", name: "Grok", icon: <Zap className="w-4 h-4" />, description: "xAI's model" },
+  { id: "chatgpt", name: "ChatGPT", icon: <ChatGPTIcon className="w-4 h-4" />, description: "OpenAI's ChatGPT" },
+  { id: "perplexity", name: "Perplexity", icon: <PerplexityIcon className="w-4 h-4" />, description: "Real-time search" },
+  { id: "gemini", name: "Gemini", icon: <GeminiIcon className="w-4 h-4" />, description: "Google's AI" },
+  { id: "grok", name: "Grok", icon: <GrokIcon className="w-4 h-4" />, description: "xAI's model" },
 ];
 
 export function RunAnalysisButton({ brandId, keywordSetId, keywordsCount }: RunAnalysisButtonProps) {
