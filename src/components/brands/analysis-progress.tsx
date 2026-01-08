@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
-import { Loader2, Eye, EyeOff, Clock, BarChart3, X, AlertCircle, Info, Timer, StopCircle } from "lucide-react";
+import { Loader2, Eye, EyeOff, Clock, BarChart3, AlertCircle, Info, Timer, StopCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   AlertDialog,
