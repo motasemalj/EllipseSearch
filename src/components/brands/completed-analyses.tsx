@@ -65,7 +65,7 @@ export function CompletedAnalyses({ brandId, onNewCompletion }: CompletedAnalyse
           created_at,
           completed_at,
           prompt_id,
-          prompts(text)
+          prompt_set_id
         `)
         .eq("brand_id", brandId)
         .eq("status", "completed")
@@ -84,22 +84,37 @@ export function CompletedAnalyses({ brandId, onNewCompletion }: CompletedAnalyse
         fetchedBatches.map(async (batch) => {
           const { data: sims } = await supabase
             .from("simulations")
-            .select("is_visible, engine")
+            .select("is_visible, engine, prompt_text")
             .eq("analysis_batch_id", batch.id);
 
           const visibleCount = sims?.filter(s => s.is_visible === true).length || 0;
           const notVisibleCount = sims?.filter(s => s.is_visible === false).length || 0;
           const engines = Array.from(new Set(sims?.map(s => s.engine) || [])) as SupportedEngine[];
 
-          // Handle prompts relation - can be object or array depending on Supabase response
-          const promptData = batch.prompts as { text: string } | { text: string }[] | null;
+          // Get prompt text - try prompt_id first, then prompt_set_id, then simulations
           let promptText = "Multiple prompts";
-          if (promptData) {
-            if (Array.isArray(promptData)) {
-              promptText = promptData[0]?.text || "Multiple prompts";
-            } else {
-              promptText = promptData.text || "Multiple prompts";
+          
+          if (batch.prompt_id) {
+            // Direct prompt_id - fetch the prompt text
+            const { data: prompt } = await supabase
+              .from("prompts")
+              .select("text")
+              .eq("id", batch.prompt_id)
+              .single();
+            promptText = prompt?.text || "Analysis completed";
+          } else if (batch.prompt_set_id) {
+            // Prompt set - get first prompt text
+            const { data: setPrompts } = await supabase
+              .from("prompts")
+              .select("text")
+              .eq("prompt_set_id", batch.prompt_set_id)
+              .limit(1);
+            if (setPrompts && setPrompts.length > 0) {
+              promptText = setPrompts[0].text;
             }
+          } else if (sims && sims.length > 0) {
+            // Fallback: get from simulations
+            promptText = sims[0].prompt_text || "Analysis completed";
           }
           
           return {

@@ -444,8 +444,26 @@ function cleanGrokResponse(content: string): string {
   
   let cleaned = content;
   
-  // FIRST PASS: Remove function call tags and their contents
+  // FIRST PASS: Remove function call tags and their contents using multiple approaches
   // These patterns match various forms of function call metadata Grok might leak
+  
+  // Most aggressive patterns first - catch any <...functioncall...> or <...function_call...> variants
+  const aggressivePatterns = [
+    // Any tag containing "functioncall" or "function_call" with any content
+    /<[^>]*functioncall[^>]*>[\s\S]*?<\/[^>]*functioncall[^>]*>/gi,
+    /<[^>]*function_call[^>]*>[\s\S]*?<\/[^>]*function_call[^>]*>/gi,
+    // Opening tags without closing - match to end of string or next tag
+    /<[^>]*functioncall[^>]*>[\s\S]*/gi,
+    /<[^>]*function_call[^>]*>[\s\S]*/gi,
+    // Just the opening tag patterns that might appear anywhere
+    /<hasfunctioncall>[^]*$/gi,
+    /<functioncall>[^]*$/gi,
+  ];
+  
+  for (const pattern of aggressivePatterns) {
+    cleaned = cleaned.replace(pattern, "");
+  }
+  
   const tagPatterns = [
     // Tag-based patterns - remove entire tag blocks
     /<hasfunctioncall>[\s\S]*?<\/hasfunctioncall>/gi,
@@ -454,18 +472,22 @@ function cleanGrokResponse(content: string): string {
     /<tool_call>[\s\S]*?<\/tool_call>/gi,
     /<websearch>[\s\S]*?<\/websearch>/gi,
     /<search>[\s\S]*?<\/search>/gi,
-    // Opening tags that might not have closing tags - remove tag and content until newline or end
-    /<hasfunctioncall>[^<]*/gi,
-    /<functioncall>[^<]*/gi,
-    /<function_call>[^<]*/gi,
-    /<tool_call>[^<]*/gi,
-    /<websearch>[^<]*/gi,
+    // Opening tags that might not have closing tags - remove tag and everything after
+    // Using [\s\S]* instead of .* with s flag for compatibility
+    /<hasfunctioncall>[\s\S]*/gi,
+    /<functioncall>[\s\S]*/gi,
+    /<function_call>[\s\S]*/gi,
+    /<tool_call>[\s\S]*/gi,
+    /<websearch>[\s\S]*/gi,
     // Self-closing or standalone tags
     /<\/?hasfunctioncall[^>]*>/gi,
     /<\/?functioncall[^>]*>/gi,
     /<\/?function_call[^>]*>/gi,
     /<\/?tool_call[^>]*>/gi,
     /<\/?websearch[^>]*>/gi,
+    // HTML-encoded variants
+    /&lt;hasfunctioncall&gt;[\s\S]*?(&lt;\/hasfunctioncall&gt;)?/gi,
+    /&lt;functioncall&gt;[\s\S]*?(&lt;\/functioncall&gt;)?/gi,
   ];
   
   for (const pattern of tagPatterns) {
@@ -475,24 +497,24 @@ function cleanGrokResponse(content: string): string {
   // SECOND PASS: Remove common internal processing phrases
   // These appear when Grok "thinks out loud" about what it's doing
   const processingPhrases = [
-    // Starting phrases
-    /^I am searching the web for[^.]*\.?\s*/gim,
-    /^I am searching for[^.]*\.?\s*/gim,
-    /^I'm searching the web for[^.]*\.?\s*/gim,
-    /^I'm searching for[^.]*\.?\s*/gim,
-    /^Searching the web for[^.]*\.?\s*/gim,
-    /^Searching for[^.]*\.?\s*/gim,
-    /^Let me search[^.]*\.?\s*/gim,
-    /^I'll search[^.]*\.?\s*/gim,
-    /^I will search[^.]*\.?\s*/gim,
-    /^I am calling the \w+ function[^.]*\.?\s*/gim,
-    /^Calling the \w+ function[^.]*\.?\s*/gim,
-    /^I am using web search[^.]*\.?\s*/gim,
-    /^Using web search[^.]*\.?\s*/gim,
-    /^I need to search[^.]*\.?\s*/gim,
-    // Mid-content variations (more careful - only match full sentences)
-    /\n+I am searching the web for[^.]*\.\s*/gi,
-    /\n+I am searching for[^.]*\.\s*/gi,
+    // Match anywhere in string (not just start) - "I am searching..."
+    /I am searching the web for[^.]*\.?\s*/gi,
+    /I am searching for[^.]*\.?\s*/gi,
+    /I'm searching the web for[^.]*\.?\s*/gi,
+    /I'm searching for[^.]*\.?\s*/gi,
+    /Searching the web for[^.]*\.?\s*/gi,
+    /Searching for[^.]*\.?\s*/gi,
+    /Let me search[^.]*\.?\s*/gi,
+    /I'll search[^.]*\.?\s*/gi,
+    /I will search[^.]*\.?\s*/gi,
+    /I am calling the \w+ function[^.]*\.?\s*/gi,
+    /Calling the \w+ function[^.]*\.?\s*/gi,
+    /I am using web search[^.]*\.?\s*/gi,
+    /Using web search[^.]*\.?\s*/gi,
+    /I need to search[^.]*\.?\s*/gi,
+    // Tool use indicators
+    /\[web_search\][^.]*\.?\s*/gi,
+    /\[x_search\][^.]*\.?\s*/gi,
   ];
   
   for (const pattern of processingPhrases) {

@@ -191,24 +191,28 @@ export function BrandPromptsList({ brandId, prompts }: BrandPromptsListProps) {
     checkRecentlyCompleted();
   }, [brandId]);
 
-  // Sort prompts: running/recently started first, then by last_checked_at
+  // Memoize the running IDs set to prevent unnecessary re-renders
+  const stableRunningIds = useMemo(() => {
+    return new Set([...runningPromptIds, ...recentlyStartedIds]);
+  }, [runningPromptIds, recentlyStartedIds]);
+
+  // Sort prompts only when prompts array changes or when running status changes significantly
+  // Use a stable sort that doesn't cause visual jumps during polling
   const sortedPrompts = useMemo(() => {
-    const allRunningIds = new Set([...runningPromptIds, ...recentlyStartedIds]);
-    
+    // Create a stable sort key for each prompt based on current state
+    const getSortKey = (prompt: PromptWithStats) => {
+      const isRunning = stableRunningIds.has(prompt.id);
+      const date = prompt.last_checked_at ? new Date(prompt.last_checked_at).getTime() : 0;
+      // Running prompts get priority (timestamp far in future), then by date
+      return isRunning ? Number.MAX_SAFE_INTEGER - date : date;
+    };
+
     return [...prompts].sort((a, b) => {
-      const aIsRunning = allRunningIds.has(a.id);
-      const bIsRunning = allRunningIds.has(b.id);
-      
-      // Running prompts first
-      if (aIsRunning && !bIsRunning) return -1;
-      if (!aIsRunning && bIsRunning) return 1;
-      
-      // Then by last_checked_at (most recent first)
-      const aDate = a.last_checked_at ? new Date(a.last_checked_at).getTime() : 0;
-      const bDate = b.last_checked_at ? new Date(b.last_checked_at).getTime() : 0;
-      return bDate - aDate;
+      const aKey = getSortKey(a);
+      const bKey = getSortKey(b);
+      return bKey - aKey; // Descending order
     });
-  }, [prompts, runningPromptIds, recentlyStartedIds]);
+  }, [prompts, stableRunningIds]);
 
   // Fetch user tier, credits, and brand crawl status when dialog opens
   useEffect(() => {

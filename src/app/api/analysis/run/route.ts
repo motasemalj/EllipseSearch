@@ -123,11 +123,15 @@ export async function POST(request: NextRequest) {
     }
 
     // Create the batch record first
+    // When running individual prompt analysis (single prompt_id), set prompt_id on the batch
+    const singlePromptId = (prompt_ids && prompt_ids.length === 1) ? prompt_ids[0] : null;
+    
     const { data: batch, error: batchError } = await supabase
       .from("analysis_batches")
       .insert({
         brand_id,
         prompt_set_id: setId || null, // Can be null for individual prompt analysis
+        prompt_id: singlePromptId, // Set when running single prompt analysis
         status: "queued",
         engines,
         language,

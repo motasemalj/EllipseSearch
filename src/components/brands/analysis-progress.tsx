@@ -72,7 +72,8 @@ export function AnalysisProgress({ brandId }: AnalysisProgressProps) {
           total_simulations, 
           completed_simulations, 
           created_at,
-          prompts(text)
+          prompt_id,
+          prompt_set_id
         `)
         .eq("brand_id", brandId)
         .in("status", ["queued", "processing"])
@@ -84,23 +85,47 @@ export function AnalysisProgress({ brandId }: AnalysisProgressProps) {
         return;
       }
 
-      // Map batches with prompt text
-      // Note: Supabase returns related data as an object for single relations
-      const batchesWithPrompt = fetchedBatches.map(b => {
-        const promptData = b.prompts as { text: string } | { text: string }[] | null;
-        let promptText = "Multiple prompts";
-        if (promptData) {
-          if (Array.isArray(promptData)) {
-            promptText = promptData[0]?.text || "Multiple prompts";
+      // Map batches with prompt text - fetch from prompts table or simulations
+      const batchesWithPrompt = await Promise.all(
+        fetchedBatches.map(async (b) => {
+          let promptText = "Multiple prompts";
+          
+          // If batch has a direct prompt_id, fetch that prompt's text
+          if (b.prompt_id) {
+            const { data: prompt } = await supabase
+              .from("prompts")
+              .select("text")
+              .eq("id", b.prompt_id)
+              .single();
+            promptText = prompt?.text || "Analysis in progress";
+          } else if (b.prompt_set_id) {
+            // If batch has a prompt_set_id, get the first prompt from that set
+            const { data: setPrompts } = await supabase
+              .from("prompts")
+              .select("text")
+              .eq("prompt_set_id", b.prompt_set_id)
+              .limit(1);
+            if (setPrompts && setPrompts.length > 0) {
+              promptText = setPrompts[0].text;
+            }
           } else {
-            promptText = promptData.text || "Multiple prompts";
+            // Fallback: try to get prompt text from simulations
+            const { data: sims } = await supabase
+              .from("simulations")
+              .select("prompt_text")
+              .eq("analysis_batch_id", b.id)
+              .limit(1);
+            if (sims && sims.length > 0) {
+              promptText = sims[0].prompt_text || "Analysis in progress";
+            }
           }
-        }
-        return {
-          ...b,
-          prompt_text: promptText,
-        };
-      });
+          
+          return {
+            ...b,
+            prompt_text: promptText,
+          };
+        })
+      );
 
       setBatches(batchesWithPrompt);
 

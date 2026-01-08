@@ -105,12 +105,16 @@ export const runKeywordSetAnalysis = task({
     if (existingBatch?.id) {
       batchId = existingBatch.id;
     } else {
+      // When running single prompt analysis, set prompt_id on the batch
+      const singlePromptId = (prompt_ids && prompt_ids.length === 1) ? prompt_ids[0] : null;
+      
       // Create new batch
       const { data: newBatch, error: batchError } = await supabase
         .from("analysis_batches")
         .insert({
           brand_id,
           prompt_set_id: prompt_set_id || null,
+          prompt_id: singlePromptId, // Set when running single prompt analysis
           status: "processing",
           engines,
           language,
