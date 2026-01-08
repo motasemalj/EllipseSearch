@@ -434,37 +434,91 @@ async function runGeminiSimulation(
 /**
  * Clean Grok response content by removing internal function call metadata
  * Grok sometimes leaks internal markers like <hasfunctioncall>, <functioncall>, etc.
+ * 
+ * IMPORTANT: Grok can sometimes return ONLY function call text with no actual results.
+ * Example: "<hasfunctioncall>I am searching the web for solar panel companies in Dubai."
+ * In such cases, we need to detect this and return empty so the system can handle it.
  */
 function cleanGrokResponse(content: string): string {
   if (!content) return "";
   
   let cleaned = content;
   
-  // Remove <hasfunctioncall>...</hasfunctioncall> and similar tags with their content
+  // FIRST PASS: Remove function call tags and their contents
   // These patterns match various forms of function call metadata Grok might leak
-  const functionCallPatterns = [
-    // Tag-based patterns
-    /<hasfunctioncall>[\s\S]*?(<\/hasfunctioncall>|$)/gi,
-    /<functioncall>[\s\S]*?(<\/functioncall>|$)/gi,
-    /<function_call>[\s\S]*?(<\/function_call>|$)/gi,
-    /<tool_call>[\s\S]*?(<\/tool_call>|$)/gi,
-    // Self-closing or unclosed tags
-    /<hasfunctioncall[^>]*\/?>/gi,
-    /<functioncall[^>]*\/?>/gi,
-    // Common prefixes that indicate internal processing text
-    /^I am calling the \w+ function to.*?(?=\n\n|\n[A-Z]|$)/gim,
-    /^Calling \w+\s*function.*?(?=\n\n|\n[A-Z]|$)/gim,
-    /^Let me search.*?(?=\n\n|\n[A-Z]|$)/gim,
-    /^I'll search.*?(?=\n\n|\n[A-Z]|$)/gim,
-    /^Searching for.*?(?=\n\n|\n[A-Z]|$)/gim,
+  const tagPatterns = [
+    // Tag-based patterns - remove entire tag blocks
+    /<hasfunctioncall>[\s\S]*?<\/hasfunctioncall>/gi,
+    /<functioncall>[\s\S]*?<\/functioncall>/gi,
+    /<function_call>[\s\S]*?<\/function_call>/gi,
+    /<tool_call>[\s\S]*?<\/tool_call>/gi,
+    /<websearch>[\s\S]*?<\/websearch>/gi,
+    /<search>[\s\S]*?<\/search>/gi,
+    // Opening tags that might not have closing tags - remove tag and content until newline or end
+    /<hasfunctioncall>[^<]*/gi,
+    /<functioncall>[^<]*/gi,
+    /<function_call>[^<]*/gi,
+    /<tool_call>[^<]*/gi,
+    /<websearch>[^<]*/gi,
+    // Self-closing or standalone tags
+    /<\/?hasfunctioncall[^>]*>/gi,
+    /<\/?functioncall[^>]*>/gi,
+    /<\/?function_call[^>]*>/gi,
+    /<\/?tool_call[^>]*>/gi,
+    /<\/?websearch[^>]*>/gi,
   ];
   
-  for (const pattern of functionCallPatterns) {
+  for (const pattern of tagPatterns) {
     cleaned = cleaned.replace(pattern, "");
   }
   
-  // Clean up any resulting double newlines or leading/trailing whitespace
+  // SECOND PASS: Remove common internal processing phrases
+  // These appear when Grok "thinks out loud" about what it's doing
+  const processingPhrases = [
+    // Starting phrases
+    /^I am searching the web for[^.]*\.?\s*/gim,
+    /^I am searching for[^.]*\.?\s*/gim,
+    /^I'm searching the web for[^.]*\.?\s*/gim,
+    /^I'm searching for[^.]*\.?\s*/gim,
+    /^Searching the web for[^.]*\.?\s*/gim,
+    /^Searching for[^.]*\.?\s*/gim,
+    /^Let me search[^.]*\.?\s*/gim,
+    /^I'll search[^.]*\.?\s*/gim,
+    /^I will search[^.]*\.?\s*/gim,
+    /^I am calling the \w+ function[^.]*\.?\s*/gim,
+    /^Calling the \w+ function[^.]*\.?\s*/gim,
+    /^I am using web search[^.]*\.?\s*/gim,
+    /^Using web search[^.]*\.?\s*/gim,
+    /^I need to search[^.]*\.?\s*/gim,
+    // Mid-content variations (more careful - only match full sentences)
+    /\n+I am searching the web for[^.]*\.\s*/gi,
+    /\n+I am searching for[^.]*\.\s*/gi,
+  ];
+  
+  for (const pattern of processingPhrases) {
+    cleaned = cleaned.replace(pattern, "");
+  }
+  
+  // Clean up any resulting multiple newlines or leading/trailing whitespace
   cleaned = cleaned.replace(/\n{3,}/g, "\n\n").trim();
+  
+  // FINAL CHECK: If after cleaning, the content is very short or looks like 
+  // residual processing text, it might mean Grok only returned function call metadata
+  // Check for responses that are essentially empty after cleaning
+  const minMeaningfulLength = 20;
+  if (cleaned.length < minMeaningfulLength) {
+    // Check if what remains looks like leftover processing text
+    const residualPatterns = [
+      /^(searching|search|calling|let me|i am|i'm|i will|i'll)\b/i,
+      /^[\s\n]*$/,
+    ];
+    for (const pattern of residualPatterns) {
+      if (pattern.test(cleaned)) {
+        console.log(`[Grok] Warning: Response appears to be only function call metadata, returning empty`);
+        return "";
+      }
+    }
+  }
   
   return cleaned;
 }
@@ -509,11 +563,17 @@ async function runGrokSimulation(
   // Clean up Grok response content - remove function call metadata that leaks into content
   // Grok sometimes returns internal function call markers like <hasfunctioncall>...</hasfunctioncall>
   const rawContent = response.choices[0]?.message?.content || "";
-  const content = cleanGrokResponse(rawContent);
+  let content = cleanGrokResponse(rawContent);
   
   // Log if we had to clean function call metadata
-  if (rawContent !== content && rawContent.length > content.length) {
-    console.log(`[Grok] Cleaned ${rawContent.length - content.length} chars of function call metadata from response`);
+  if (rawContent !== content) {
+    const cleaned = rawContent.length - content.length;
+    if (cleaned > 0) {
+      console.log(`[Grok] Cleaned ${cleaned} chars of function call metadata from response`);
+    }
+    if (content.length === 0 && rawContent.length > 0) {
+      console.log(`[Grok] WARNING: Entire response was function call metadata. Raw: "${rawContent.substring(0, 200)}..."`);
+    }
   }
   
   const sources: SourceReference[] = [];
@@ -606,6 +666,14 @@ async function runGrokSimulation(
   };
 
   console.log(`[Grok] Response generated with ${sources.length} sources, ${xPosts.length} X posts for: "${keyword}"`);
+
+  // FALLBACK: If content is empty but we have sources, generate a placeholder response
+  // This handles cases where Grok only returned function call metadata
+  if (!content && sources.length > 0) {
+    console.log(`[Grok] Content was empty but have ${sources.length} sources - generating fallback response`);
+    const sourceList = sources.slice(0, 5).map(s => s.title || new URL(s.url).hostname).join(", ");
+    content = `Based on search results for "${keyword}", relevant sources include: ${sourceList}. Please see the cited sources for detailed information.`;
+  }
 
   const standardized = createStandardizedResult(
     'grok',
