@@ -46,14 +46,14 @@ export const SimulationsVolumeChart = memo(function SimulationsVolumeChart({
   className,
 }: SimulationsVolumeChartProps) {
   // Memoize data processing
-  const { formattedData, maxValue } = useMemo(() => {
+  const { formattedData } = useMemo(() => {
     const max = Math.max(...data.map(d => d.total), 1);
     const formatted = data.map(d => ({
       ...d,
       displayDate: new Date(d.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
       intensity: d.total / max,
     }));
-    return { formattedData: formatted, maxValue: max };
+    return { formattedData: formatted };
   }, [data]);
 
   // Don't render chart if no data

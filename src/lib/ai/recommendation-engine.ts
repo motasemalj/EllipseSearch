@@ -28,7 +28,6 @@ import type {
   SupportedEngine, 
   TieredRecommendation, 
   GroupedRecommendations,
-  RecommendationCategory,
 } from "@/types";
 
 export interface RecommendationContext {
@@ -579,8 +578,10 @@ function generateGeminiSuggestions(
 
 function generateGrokSuggestions(
   brandName: string,
-  brandDomain: string,
-  isVisible: boolean
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  _brandDomain: string,
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  _isVisible: boolean
 ): TieredRecommendation[] {
   const recs: TieredRecommendation[] = [];
   
@@ -699,12 +700,12 @@ function deduplicateRecommendations(recs: TieredRecommendation[]): TieredRecomme
     const key = `${rec.engine}-${rec.category}-${rec.title.toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 50)}`;
     const existing = seen.get(key);
     
-    // Prefer verified over suggestions, then higher priority score
+    // Prefer actionable over suggestions, then higher priority score
     if (!existing) {
       seen.set(key, rec);
-    } else if (rec.type === 'verified' && existing.type === 'suggestion') {
+    } else if (rec.section === 'actionable' && existing.section === 'suggestion') {
       seen.set(key, rec);
-    } else if (rec.type === existing.type && rec.priority_score > existing.priority_score) {
+    } else if (rec.section === existing.section && rec.priority_score > existing.priority_score) {
       seen.set(key, rec);
     }
   }
@@ -723,7 +724,7 @@ export function generateRecommendationSummary(
     return 'Crawl your website first to get specific recommendations.';
   }
   
-  const verified = recommendations.filter(r => r.type === 'verified');
+  const verified = recommendations.filter(r => r.section === 'actionable');
   const foundational = verified.filter(r => r.tier === 'foundational');
   
   if (foundational.length > 0) {

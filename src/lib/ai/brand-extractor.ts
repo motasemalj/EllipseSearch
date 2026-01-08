@@ -20,7 +20,6 @@ import { OPENAI_CHAT_MODEL } from "@/lib/ai/openai-config";
 import type { 
   SourceReference, 
   SupportedEngine,
-  StandardizedSource,
 } from "@/types";
 
 const openai = new OpenAI({
@@ -442,7 +441,8 @@ function aggregateBrands(
       confidence: "high" | "medium" | "low";
     }>;
   },
-  candidateBrands: Map<string, string[]>
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  _candidateBrands: Map<string, string[]>
 ): ExtractedBrand[] {
   const brandMap = new Map<string, ExtractedBrand>();
 

@@ -256,12 +256,16 @@ export function Header({ user, credits, onMenuClick }: HeaderProps) {
           name: b.name,
           description: b.domain,
         })),
-        ...(promptsResult.data || []).map(p => ({
-          type: "prompt" as const,
-          id: p.id,
-          name: p.text.substring(0, 50) + (p.text.length > 50 ? "..." : ""),
-          description: (p.brands as { name: string } | null)?.name,
-        })),
+        ...(promptsResult.data || []).map(p => {
+          const brands = p.brands as { name: string }[] | { name: string } | null;
+          const brandName = Array.isArray(brands) ? brands[0]?.name : brands?.name;
+          return {
+            type: "prompt" as const,
+            id: p.id,
+            name: p.text.substring(0, 50) + (p.text.length > 50 ? "..." : ""),
+            description: brandName,
+          };
+        }),
       ];
 
       setSearchResults(results);

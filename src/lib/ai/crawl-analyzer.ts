@@ -252,7 +252,6 @@ function analyzeSchemaMarkup(pages: CrawledPage[]): CrawlAnalysis['schema_markup
   
   for (const page of pages) {
     const html = page.html || '';
-    const markdown = page.markdown || '';
     
     // Look for JSON-LD script tags in HTML or markdown
     const jsonLdMatches = html.match(/<script[^>]*type\s*=\s*["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi) || [];
@@ -343,7 +342,7 @@ function analyzeSchemaMarkup(pages: CrawledPage[]): CrawlAnalysis['schema_markup
             }
           }
         }
-      } catch (e) {
+      } catch {
         result.schema_issues.push({
           type: 'Invalid',
           issue: 'Invalid JSON-LD syntax',
@@ -489,7 +488,6 @@ function analyzeContentStructure(pages: CrawledPage[]): CrawlAnalysis['content_s
     const url = page.url.toLowerCase();
     const title = (page.title || '').toLowerCase();
     const markdown = page.markdown || '';
-    const markdownLower = markdown.toLowerCase();
     
     // Find pricing page
     if (url.includes('pricing') || url.includes('plans') || title.includes('pricing')) {
@@ -620,7 +618,7 @@ function analyzeAuthoritySignals(pages: CrawledPage[]): CrawlAnalysis['authority
   }
   
   // Dedupe awards
-  result.awards_mentioned = [...new Set(result.awards_mentioned)].slice(0, 10);
+  result.awards_mentioned = Array.from(new Set(result.awards_mentioned)).slice(0, 10);
   
   return result;
 }
@@ -644,7 +642,6 @@ function analyzeFreshness(pages: CrawledPage[]): CrawlAnalysis['freshness'] {
   const criticalPagePatterns = ['pricing', 'product', 'feature', 'service', 'solution', 'about'];
   
   for (const page of pages) {
-    const crawledAt = new Date(page.crawledAt);
     const metadata = page.metadata as { lastModified?: string; modifiedTime?: string } | undefined;
     const lastModified = metadata?.lastModified || metadata?.modifiedTime;
     
@@ -813,7 +810,7 @@ function generateSummary(
   // MEDIUM: Schema sameAs missing
   if (analysis.schema_markup.organization_schema?.found && !analysis.schema_markup.organization_schema.has_sameas) {
     medium.push({
-      category: 'schema',
+      category: 'content-structure',
       title: 'Organization Schema Missing sameAs Links',
       details: `Organization schema lacks sameAs links. AI cannot connect ${brandName} to social profiles.`,
       fix: `Add sameAs array with links to: LinkedIn, Twitter/X, Facebook, Instagram, YouTube, Crunchbase, Wikipedia (if exists).`,

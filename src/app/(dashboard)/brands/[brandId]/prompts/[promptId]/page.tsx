@@ -29,6 +29,8 @@ import {
   History,
   ChevronDown,
   Loader2,
+  Zap,
+  Sparkles,
 } from "lucide-react";
 import {
   Tooltip,

@@ -300,7 +300,7 @@ export function BrandPromptsList({ brandId, prompts }: BrandPromptsListProps) {
       }
 
       // Add to recently started to move to top of list
-      setRecentlyStartedIds(prev => [...new Set([promptId, ...prev])]);
+      setRecentlyStartedIds(prev => Array.from(new Set([promptId, ...prev])));
 
       const watchdogMessage = enableWatchdog && canUseWatchdog && hasCrawledData
         ? " Hallucination detection enabled." 
@@ -329,6 +329,25 @@ export function BrandPromptsList({ brandId, prompts }: BrandPromptsListProps) {
     setSelectedPromptId(promptId);
     setShowAnalyzeDialog(true);
   };
+
+  // Combine external running IDs with locally tracked ones
+  // MUST be called before any early returns to satisfy React hooks rules
+  const allRunningIds = useMemo(() => 
+    new Set([...runningPromptIds, ...recentlyStartedIds.filter(id => runningPromptIds.includes(id))]),
+    [runningPromptIds, recentlyStartedIds]
+  );
+
+  // Clear recently started IDs that are no longer running (analysis completed)
+  // MUST be called before any early returns to satisfy React hooks rules
+  useEffect(() => {
+    if (runningPromptIds.length === 0 && recentlyStartedIds.length > 0) {
+      // Clear after a delay to allow UI to update
+      const timeout = setTimeout(() => {
+        setRecentlyStartedIds([]);
+      }, 2000);
+      return () => clearTimeout(timeout);
+    }
+  }, [runningPromptIds, recentlyStartedIds]);
 
   if (prompts.length === 0) {
     return (
@@ -362,23 +381,6 @@ export function BrandPromptsList({ brandId, prompts }: BrandPromptsListProps) {
       </div>
     );
   }
-
-  // Combine external running IDs with locally tracked ones
-  const allRunningIds = useMemo(() => 
-    new Set([...runningPromptIds, ...recentlyStartedIds.filter(id => runningPromptIds.includes(id))]),
-    [runningPromptIds, recentlyStartedIds]
-  );
-
-  // Clear recently started IDs that are no longer running (analysis completed)
-  useEffect(() => {
-    if (runningPromptIds.length === 0 && recentlyStartedIds.length > 0) {
-      // Clear after a delay to allow UI to update
-      const timeout = setTimeout(() => {
-        setRecentlyStartedIds([]);
-      }, 2000);
-      return () => clearTimeout(timeout);
-    }
-  }, [runningPromptIds, recentlyStartedIds]);
 
   return (
     <div className="space-y-2">

@@ -17,15 +17,10 @@
 
 import { task } from "@trigger.dev/sdk/v3";
 import { createClient } from "@supabase/supabase-js";
-import { runSimulation } from "@/lib/ai/factory";
 import { 
   runEnsembleSimulation,
   runSingleSimulationWithExtraction,
 } from "@/lib/ai/ensemble-simulation";
-import { 
-  extractBrands,
-  checkBrandVisibility,
-} from "@/lib/ai/brand-extractor";
 import { 
   analyzeSelectionSignals, 
   thoroughVisibilityCheck,
@@ -560,7 +555,7 @@ export const checkPromptVisibility = task({
         console.log(`  Tiers: Foundational=${tierCounts.foundational}, High=${tierCounts.high}, Medium=${tierCounts.medium}, Nice-to-have=${tierCounts['nice-to-have']}`);
         
         // Log platform-specific recommendations
-        const platformRecs = enhancedSignals.tiered_recommendations.filter(r => r.platform_specific === engine);
+        const platformRecs = enhancedSignals.tiered_recommendations.filter(r => r.engine === engine);
         if (platformRecs.length > 0) {
           console.log(`  Platform-specific (${engine}): ${platformRecs.length} recommendations`);
         }

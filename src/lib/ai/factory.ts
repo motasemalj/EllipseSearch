@@ -109,18 +109,6 @@ async function runChatGPTSimulation(
     : keyword;
 
   console.log(`[ChatGPT] Searching: "${keyword}" (region: ${region})`);
-  
-  type WebSearchPreviewTool = {
-    type: "web_search_preview";
-    search_context_size?: "low" | "medium" | "high";
-    user_location?: {
-      type: "approximate";
-      city?: string;
-      country: string;
-      region?: string;
-      timezone?: string;
-    };
-  };
 
   // FIX: When web search is enabled, we MUST use regionalQuery to get region-specific results
   // The regional hints in the query are crucial for accurate brand detection
@@ -521,7 +509,7 @@ async function runGrokSimulation(
   // Clean up Grok response content - remove function call metadata that leaks into content
   // Grok sometimes returns internal function call markers like <hasfunctioncall>...</hasfunctioncall>
   const rawContent = response.choices[0]?.message?.content || "";
-  let content = cleanGrokResponse(rawContent);
+  const content = cleanGrokResponse(rawContent);
   
   // Log if we had to clean function call metadata
   if (rawContent !== content && rawContent.length > content.length) {

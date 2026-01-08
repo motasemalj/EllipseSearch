@@ -21,7 +21,6 @@ import {
   extractBrands, 
   checkBrandVisibility,
   type BrandExtractionResult,
-  type ExtractedBrand,
 } from "@/lib/ai/brand-extractor";
 import { 
   ENSEMBLE_RUN_COUNT, 
@@ -374,7 +373,7 @@ function aggregateBrandsAcrossRuns(
   // Convert to array and calculate frequencies
   const results: EnsembleBrandResult[] = [];
   
-  for (const [normalizedName, entry] of brandMap) {
+  for (const [normalizedName, entry] of Array.from(brandMap.entries())) {
     const frequency = entry.appearances / totalRuns;
     const presenceLevel = getPresenceLevel(frequency);
     
@@ -403,7 +402,8 @@ function aggregateBrandsAcrossRuns(
 function analyzeTargetBrand(
   target: { name: string; domain: string; aliases: string[] },
   extractions: BrandExtractionResult[],
-  runResults: EnsembleSimulationResult["run_results"]
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  _runResults: EnsembleSimulationResult["run_results"]
 ): TargetBrandResult {
   const runResultsArr: TargetBrandResult["run_results"] = [];
   let mentionedInRuns = 0;
