@@ -444,6 +444,44 @@ async function runGeminiSimulation(
 // ===========================================
 
 /**
+ * Clean Grok response content by removing internal function call metadata
+ * Grok sometimes leaks internal markers like <hasfunctioncall>, <functioncall>, etc.
+ */
+function cleanGrokResponse(content: string): string {
+  if (!content) return "";
+  
+  let cleaned = content;
+  
+  // Remove <hasfunctioncall>...</hasfunctioncall> and similar tags with their content
+  // These patterns match various forms of function call metadata Grok might leak
+  const functionCallPatterns = [
+    // Tag-based patterns
+    /<hasfunctioncall>[\s\S]*?(<\/hasfunctioncall>|$)/gi,
+    /<functioncall>[\s\S]*?(<\/functioncall>|$)/gi,
+    /<function_call>[\s\S]*?(<\/function_call>|$)/gi,
+    /<tool_call>[\s\S]*?(<\/tool_call>|$)/gi,
+    // Self-closing or unclosed tags
+    /<hasfunctioncall[^>]*\/?>/gi,
+    /<functioncall[^>]*\/?>/gi,
+    // Common prefixes that indicate internal processing text
+    /^I am calling the \w+ function to.*?(?=\n\n|\n[A-Z]|$)/gim,
+    /^Calling \w+\s*function.*?(?=\n\n|\n[A-Z]|$)/gim,
+    /^Let me search.*?(?=\n\n|\n[A-Z]|$)/gim,
+    /^I'll search.*?(?=\n\n|\n[A-Z]|$)/gim,
+    /^Searching for.*?(?=\n\n|\n[A-Z]|$)/gim,
+  ];
+  
+  for (const pattern of functionCallPatterns) {
+    cleaned = cleaned.replace(pattern, "");
+  }
+  
+  // Clean up any resulting double newlines or leading/trailing whitespace
+  cleaned = cleaned.replace(/\n{3,}/g, "\n\n").trim();
+  
+  return cleaned;
+}
+
+/**
  * Grok Simulation - Uses xAI native tools
  * 
  * CRITICAL: Grok's unique value is real-time X (Twitter) data.
@@ -480,7 +518,16 @@ async function runGrokSimulation(
     ] as unknown as undefined, // Type workaround
   });
 
-  const content = response.choices[0]?.message?.content || "";
+  // Clean up Grok response content - remove function call metadata that leaks into content
+  // Grok sometimes returns internal function call markers like <hasfunctioncall>...</hasfunctioncall>
+  const rawContent = response.choices[0]?.message?.content || "";
+  let content = cleanGrokResponse(rawContent);
+  
+  // Log if we had to clean function call metadata
+  if (rawContent !== content && rawContent.length > content.length) {
+    console.log(`[Grok] Cleaned ${rawContent.length - content.length} chars of function call metadata from response`);
+  }
+  
   const sources: SourceReference[] = [];
   const xPosts: XPost[] = [];
   const searchResults: Array<{ url: string; title: string; snippet: string }> = [];
