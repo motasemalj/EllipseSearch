@@ -196,21 +196,32 @@ export function BrandPromptsList({ brandId, prompts }: BrandPromptsListProps) {
     return new Set([...runningPromptIds, ...recentlyStartedIds]);
   }, [runningPromptIds, recentlyStartedIds]);
 
-  // Sort prompts only when prompts array changes or when running status changes significantly
-  // Use a stable sort that doesn't cause visual jumps during polling
+  // Sort prompts: Running > New (never analyzed) > Recently analyzed
+  // Server already returns prompts sorted by created_at DESC (newest first)
   const sortedPrompts = useMemo(() => {
-    // Create a stable sort key for each prompt based on current state
-    const getSortKey = (prompt: PromptWithStats) => {
-      const isRunning = stableRunningIds.has(prompt.id);
-      const date = prompt.last_checked_at ? new Date(prompt.last_checked_at).getTime() : 0;
-      // Running prompts get priority (timestamp far in future), then by date
-      return isRunning ? Number.MAX_SAFE_INTEGER - date : date;
-    };
-
     return [...prompts].sort((a, b) => {
-      const aKey = getSortKey(a);
-      const bKey = getSortKey(b);
-      return bKey - aKey; // Descending order
+      const aIsRunning = stableRunningIds.has(a.id);
+      const bIsRunning = stableRunningIds.has(b.id);
+      
+      // 1. Running prompts first
+      if (aIsRunning && !bIsRunning) return -1;
+      if (!aIsRunning && bIsRunning) return 1;
+      
+      // 2. New prompts (never analyzed) second
+      const aIsNew = a.total_sims === 0;
+      const bIsNew = b.total_sims === 0;
+      if (aIsNew && !bIsNew) return -1;
+      if (!aIsNew && bIsNew) return 1;
+      
+      // 3. Both new: maintain server order (already sorted by created_at DESC)
+      if (aIsNew && bIsNew) {
+        return prompts.indexOf(a) - prompts.indexOf(b);
+      }
+      
+      // 4. Both analyzed: sort by last_checked_at (most recent first)
+      const aDate = a.last_checked_at ? new Date(a.last_checked_at).getTime() : 0;
+      const bDate = b.last_checked_at ? new Date(b.last_checked_at).getTime() : 0;
+      return bDate - aDate;
     });
   }, [prompts, stableRunningIds]);
 
