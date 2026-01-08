@@ -178,9 +178,9 @@ export function AnalysisProgress({ brandId }: AnalysisProgressProps) {
 
   return (
     <TooltipProvider>
-      <div className="space-y-3">
+      <div className="rounded-2xl border border-primary/30 bg-gradient-to-br from-primary/10 via-primary/5 to-transparent p-5">
         {/* Header */}
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between mb-4">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-xl bg-primary/20 flex items-center justify-center">
               <BarChart3 className="w-5 h-5 text-primary" />
@@ -209,6 +209,7 @@ export function AnalysisProgress({ brandId }: AnalysisProgressProps) {
         </div>
 
         {/* Individual Analysis Cards - Each batch gets its own row */}
+        <div className="space-y-3">
         {batches.map((batch) => {
           const progress = batch.total_simulations > 0 
             ? Math.round((batch.completed_simulations / batch.total_simulations) * 100) 
@@ -287,6 +288,7 @@ export function AnalysisProgress({ brandId }: AnalysisProgressProps) {
             </div>
           );
         })}
+        </div>
       </div>
 
       {/* Cancel Confirmation Dialog */}
