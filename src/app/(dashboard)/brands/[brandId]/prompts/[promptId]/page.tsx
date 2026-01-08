@@ -1065,9 +1065,6 @@ function ActionItemCard({
   item: ActionItem; 
   config: { color: string; bg: string; border: string; icon: React.ReactNode };
 }) {
-  // Clean title (remove emoji prefix if present)
-  const cleanTitle = item.title.replace(/^[⚡💡]\s*/, '');
-  
   return (
     <div className={`rounded-xl border p-4 ${config.border} ${config.bg}`}>
       <div className="flex items-start gap-3">
@@ -1100,7 +1097,7 @@ function ActionItemCard({
                 )}
               </span>
             )}
-            <h4 className="font-semibold">{cleanTitle}</h4>
+            <h4 className="font-semibold">{item.title}</h4>
             <span className="px-2 py-0.5 rounded-full bg-background/60 text-xs capitalize text-muted-foreground">
               {item.category}
             </span>

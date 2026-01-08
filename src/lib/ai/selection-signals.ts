@@ -600,10 +600,8 @@ export function enhanceWithTieredRecommendations(
   const legacyActionItems = tieredRecommendations.slice(0, 10).map(rec => ({
     priority: rec.tier as 'high' | 'medium' | 'foundational' | 'nice-to-have',
     category: mapCategoryToLegacy(rec.category),
-    // Clean, minimal badge format
-    title: rec.section === 'actionable' 
-      ? `⚡ ${rec.title}` 
-      : `💡 ${rec.title}`,
+    // Use plain title - UI components will add icons via Lucide to avoid hydration issues
+    title: rec.title,
     description: rec.description,
     steps: [rec.action, rec.impact, rec.evidence].filter(Boolean) as string[],
     // Add section info for UI to style differently
