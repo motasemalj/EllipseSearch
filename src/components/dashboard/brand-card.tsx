@@ -2,6 +2,7 @@
 
 import { memo, useMemo } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { cn } from "@/lib/utils";
 import { Brand, SupportedEngine } from "@/types";
 import { VisibilityGauge } from "@/components/ui/visibility-gauge";
@@ -54,6 +55,7 @@ export const BrandCard = memo(function BrandCard({
   simulationsCount, 
   className 
 }: BrandCardProps) {
+  const router = useRouter();
   const overallVisibility = visibility?.overall ?? 0;
   
   // Memoize languages display
@@ -62,12 +64,32 @@ export const BrandCard = memo(function BrandCard({
     return brand.languages.map(l => l.toUpperCase()).join(", ");
   }, [brand.languages]);
 
+  // Handle card click - navigate to brand details
+  const handleCardClick = (e: React.MouseEvent) => {
+    // Don't navigate if clicking on the View button (it has its own navigation)
+    if ((e.target as HTMLElement).closest('button, a')) {
+      return;
+    }
+    router.push(`/brands/${brand.id}`);
+  };
+
   return (
-    <div className={cn(
-      "group relative overflow-hidden rounded-2xl border border-border bg-card p-6 transition-all duration-300",
-      "hover:border-primary/50 hover:shadow-xl hover:shadow-primary/5",
-      className
-    )}>
+    <div 
+      className={cn(
+        "group relative overflow-hidden rounded-2xl border border-border bg-card p-6 transition-all duration-300 cursor-pointer",
+        "hover:border-primary/50 hover:shadow-xl hover:shadow-primary/5",
+        className
+      )}
+      onClick={handleCardClick}
+      role="button"
+      tabIndex={0}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          router.push(`/brands/${brand.id}`);
+        }
+      }}
+    >
       {/* Background gradient effect on hover */}
       <div className="absolute inset-0 bg-gradient-to-br from-primary/5 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
       
@@ -124,7 +146,7 @@ export const BrandCard = memo(function BrandCard({
             )}
           </div>
           
-          <Link href={`/brands/${brand.id}`} prefetch={true}>
+          <Link href={`/brands/${brand.id}`} prefetch={true} onClick={(e) => e.stopPropagation()}>
             <Button variant="ghost" size="sm" className="gap-1 group/btn">
               View
               <ArrowRight className="w-4 h-4 group-hover/btn:translate-x-0.5 transition-transform" />

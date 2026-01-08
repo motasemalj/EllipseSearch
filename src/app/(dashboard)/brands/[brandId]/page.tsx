@@ -13,6 +13,8 @@ import {
   GitCompareArrows,
   ListChecks,
   Search,
+  Info,
+  Plus,
 } from "lucide-react";
 import { StatRow } from "@/components/ui/metric-card";
 import { VisibilityGauge } from "@/components/ui/visibility-gauge";
@@ -28,7 +30,7 @@ import { TopSourcesDrilldown } from "@/components/brands/top-sources-drilldown";
 import { AddPromptDialog } from "@/components/brands/add-prompt-dialog";
 import { BrandPromptsList } from "@/components/brands/brand-prompts-list";
 import { AnalysisProgress } from "@/components/brands/analysis-progress";
-import { Plus } from "lucide-react";
+import { CompletedAnalyses } from "@/components/brands/completed-analyses";
 
 // Route segment config for caching
 export const revalidate = 60;
@@ -171,6 +173,22 @@ export default async function BrandPage({ params }: BrandPageProps) {
 
       {/* Running Analyses Section */}
       <AnalysisProgress brandId={brandId} />
+
+      {/* Recently Completed Analyses */}
+      <CompletedAnalyses brandId={brandId} />
+
+      {/* AI Accuracy Disclaimer */}
+      <div className="flex items-start gap-3 p-4 rounded-xl bg-amber-500/5 border border-amber-500/20">
+        <Info className="w-5 h-5 text-amber-600 dark:text-amber-400 mt-0.5 flex-shrink-0" />
+        <div className="text-sm">
+          <p className="font-medium text-amber-700 dark:text-amber-300">Results may vary</p>
+          <p className="text-muted-foreground mt-0.5">
+            AI search engines generate responses dynamically and results can change between queries. 
+            Visibility scores are estimates based on simulated queries and may not reflect real-time user experiences. 
+            Use these insights as directional guidance for your AI optimization strategy.
+          </p>
+        </div>
+      </div>
 
       {/* Insights - Clean 2x2 Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">

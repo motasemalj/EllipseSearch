@@ -352,6 +352,18 @@ export default async function PromptPage({ params }: PromptPageProps) {
         </div>
       </div>
 
+      {/* AI Accuracy Disclaimer */}
+      <div className="flex items-start gap-3 p-4 rounded-xl bg-amber-500/5 border border-amber-500/20">
+        <Info className="w-5 h-5 text-amber-600 dark:text-amber-400 mt-0.5 flex-shrink-0" />
+        <div className="text-sm">
+          <p className="font-medium text-amber-700 dark:text-amber-300">Results are estimates</p>
+          <p className="text-muted-foreground mt-0.5">
+            AI responses vary between queries and over time. These results represent simulated queries and may differ from actual user experiences. 
+            Use as directional guidance for your optimization strategy.
+          </p>
+        </div>
+      </div>
+
       {/* Overview Stats */}
       <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
         {/* Main Visibility */}

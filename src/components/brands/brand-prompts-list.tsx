@@ -22,6 +22,7 @@ import {
   AlertTriangle,
   Globe,
   ArrowUp,
+  CheckCircle,
 } from "lucide-react";
 import { ChatGPTIcon, PerplexityIcon, GeminiIcon, GrokIcon } from "@/components/ui/engine-badge";
 import {
@@ -65,6 +66,7 @@ export function BrandPromptsList({ brandId, prompts }: BrandPromptsListProps) {
   const [isAnalyzing, setIsAnalyzing] = useState<string | null>(null);
   const [recentlyStartedIds, setRecentlyStartedIds] = useState<string[]>([]);
   const [runningPromptIds, setRunningPromptIds] = useState<string[]>([]);
+  const [justRanIds, setJustRanIds] = useState<Set<string>>(new Set()); // Track prompts that just finished
   const [isCrawling, setIsCrawling] = useState(false);
   const [showAnalyzeDialog, setShowAnalyzeDialog] = useState(false);
   const [selectedPromptId, setSelectedPromptId] = useState<string | null>(null);
@@ -77,9 +79,10 @@ export function BrandPromptsList({ brandId, prompts }: BrandPromptsListProps) {
   const [creditsBalance, setCreditsBalance] = useState<number>(0);
   const [brandDomain, setBrandDomain] = useState<string>("");
 
-  // Fetch running prompt IDs
+  // Fetch running prompt IDs and track completions
   useEffect(() => {
     const supabase = createClient();
+    let previousRunningIds = new Set<string>();
     
     const fetchRunning = async () => {
       // Get running batches
@@ -90,6 +93,23 @@ export function BrandPromptsList({ brandId, prompts }: BrandPromptsListProps) {
         .in("status", ["queued", "processing"]);
 
       if (!batches || batches.length === 0) {
+        // Check if any prompts just finished (were running, now not)
+        if (previousRunningIds.size > 0) {
+          setJustRanIds(prev => {
+            const newSet = new Set(prev);
+            previousRunningIds.forEach(id => newSet.add(id));
+            return newSet;
+          });
+          // Clear "just ran" status after 2 minutes
+          setTimeout(() => {
+            setJustRanIds(prev => {
+              const newSet = new Set(prev);
+              previousRunningIds.forEach(id => newSet.delete(id));
+              return newSet;
+            });
+          }, 120000);
+        }
+        previousRunningIds = new Set();
         setRunningPromptIds([]);
         return;
       }
@@ -116,12 +136,59 @@ export function BrandPromptsList({ brandId, prompts }: BrandPromptsListProps) {
         }
       }
 
+      // Track which prompts just finished running
+      previousRunningIds.forEach(id => {
+        if (!promptIds.has(id)) {
+          setJustRanIds(prev => new Set([...prev, id]));
+          // Clear "just ran" status after 2 minutes
+          setTimeout(() => {
+            setJustRanIds(prev => {
+              const newSet = new Set(prev);
+              newSet.delete(id);
+              return newSet;
+            });
+          }, 120000);
+        }
+      });
+
+      previousRunningIds = promptIds;
       setRunningPromptIds(Array.from(promptIds));
     };
 
     fetchRunning();
     const interval = setInterval(fetchRunning, 2000);
     return () => clearInterval(interval);
+  }, [brandId]);
+
+  // Also check for recently completed analyses on mount
+  useEffect(() => {
+    const checkRecentlyCompleted = async () => {
+      const supabase = createClient();
+      const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+      
+      const { data: recentBatches } = await supabase
+        .from("analysis_batches")
+        .select("prompt_id")
+        .eq("brand_id", brandId)
+        .eq("status", "completed")
+        .gte("completed_at", fiveMinutesAgo);
+
+      if (recentBatches && recentBatches.length > 0) {
+        const recentIds = new Set(
+          recentBatches
+            .filter(b => b.prompt_id)
+            .map(b => b.prompt_id as string)
+        );
+        setJustRanIds(recentIds);
+        
+        // Clear after 2 minutes
+        setTimeout(() => {
+          setJustRanIds(new Set());
+        }, 120000);
+      }
+    };
+    
+    checkRecentlyCompleted();
   }, [brandId]);
 
   // Sort prompts: running/recently started first, then by last_checked_at
@@ -391,6 +458,7 @@ export function BrandPromptsList({ brandId, prompts }: BrandPromptsListProps) {
         
         const isRunning = allRunningIds.has(prompt.id) || recentlyStartedIds.includes(prompt.id);
         const wasJustStarted = recentlyStartedIds.includes(prompt.id) && index === 0;
+        const hasJustRan = justRanIds.has(prompt.id) && !isRunning;
         
         const getVisibilityColor = (v: number | null) => {
           if (isRunning) return "bg-primary/10 text-primary";
@@ -413,13 +481,21 @@ export function BrandPromptsList({ brandId, prompts }: BrandPromptsListProps) {
         return (
           <div
             key={prompt.id}
-            className={`group relative transition-all duration-300 ${wasJustStarted ? 'animate-pulse' : ''}`}
+            className={`group relative transition-all duration-300 ${wasJustStarted ? 'animate-pulse' : ''} ${hasJustRan ? 'ring-2 ring-emerald-500/30 ring-offset-2 ring-offset-background rounded-xl' : ''}`}
           >
-            {/* "Moved to top" indicator */}
+            {/* "Running" indicator */}
             {wasJustStarted && (
               <div className="absolute -top-2 left-4 z-10 flex items-center gap-1 px-2 py-0.5 rounded-full bg-primary text-primary-foreground text-[10px] font-medium shadow-sm">
                 <ArrowUp className="w-3 h-3" />
                 Running
+              </div>
+            )}
+            
+            {/* "Just Ran" indicator */}
+            {hasJustRan && !wasJustStarted && (
+              <div className="absolute -top-2 left-4 z-10 flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-500 text-white text-[10px] font-medium shadow-sm animate-pulse">
+                <CheckCircle className="w-3 h-3" />
+                Just Ran
               </div>
             )}
             
@@ -436,6 +512,7 @@ export function BrandPromptsList({ brandId, prompts }: BrandPromptsListProps) {
                   getVisibilityIcon={getVisibilityIcon}
                   isClickable={true}
                   isRunning={isRunning}
+                  hasJustRan={hasJustRan}
                 />
               </Link>
             ) : (
@@ -446,6 +523,7 @@ export function BrandPromptsList({ brandId, prompts }: BrandPromptsListProps) {
                 getVisibilityIcon={getVisibilityIcon}
                 isClickable={false}
                 isRunning={isRunning}
+                hasJustRan={hasJustRan}
               />
             )}
 
@@ -738,6 +816,7 @@ function PromptCard({
   getVisibilityIcon,
   isClickable,
   isRunning = false,
+  hasJustRan = false,
 }: {
   prompt: PromptWithStats;
   visibility: number | null;
@@ -745,15 +824,18 @@ function PromptCard({
   getVisibilityIcon: (v: number | null) => React.ReactNode;
   isClickable: boolean;
   isRunning?: boolean;
+  hasJustRan?: boolean;
 }) {
   return (
     <div
       className={`flex items-center gap-4 p-4 rounded-xl border bg-card transition-all ${
         isRunning
           ? "border-primary/50 bg-primary/5 ring-1 ring-primary/20"
-          : isClickable 
-            ? "hover:border-primary/40 hover:bg-primary/5 cursor-pointer hover:shadow-md" 
-            : "border-border"
+          : hasJustRan
+            ? "border-emerald-500/50 bg-emerald-500/5"
+            : isClickable 
+              ? "hover:border-primary/40 hover:bg-primary/5 cursor-pointer hover:shadow-md" 
+              : "border-border"
       }`}
     >
       {/* Visibility Badge */}
