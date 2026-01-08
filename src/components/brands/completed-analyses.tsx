@@ -91,9 +91,20 @@ export function CompletedAnalyses({ brandId, onNewCompletion }: CompletedAnalyse
           const notVisibleCount = sims?.filter(s => s.is_visible === false).length || 0;
           const engines = Array.from(new Set(sims?.map(s => s.engine) || [])) as SupportedEngine[];
 
+          // Handle prompts relation - can be object or array depending on Supabase response
+          const promptData = batch.prompts as { text: string } | { text: string }[] | null;
+          let promptText = "Multiple prompts";
+          if (promptData) {
+            if (Array.isArray(promptData)) {
+              promptText = promptData[0]?.text || "Multiple prompts";
+            } else {
+              promptText = promptData.text || "Multiple prompts";
+            }
+          }
+          
           return {
             ...batch,
-            prompt_text: (batch.prompts as { text: string } | null)?.text || "Multiple prompts",
+            prompt_text: promptText,
             visible_count: visibleCount,
             not_visible_count: notVisibleCount,
             engines,

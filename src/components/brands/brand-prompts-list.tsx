@@ -137,9 +137,9 @@ export function BrandPromptsList({ brandId, prompts }: BrandPromptsListProps) {
       }
 
       // Track which prompts just finished running
-      previousRunningIds.forEach(id => {
+      Array.from(previousRunningIds).forEach(id => {
         if (!promptIds.has(id)) {
-          setJustRanIds(prev => new Set([...prev, id]));
+          setJustRanIds(prev => new Set([...Array.from(prev), id]));
           // Clear "just ran" status after 2 minutes
           setTimeout(() => {
             setJustRanIds(prev => {

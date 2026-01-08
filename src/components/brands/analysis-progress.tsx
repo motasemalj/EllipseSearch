@@ -85,10 +85,22 @@ export function AnalysisProgress({ brandId }: AnalysisProgressProps) {
       }
 
       // Map batches with prompt text
-      const batchesWithPrompt = fetchedBatches.map(b => ({
-        ...b,
-        prompt_text: (b.prompts as { text: string } | null)?.text || "Multiple prompts",
-      }));
+      // Note: Supabase returns related data as an object for single relations
+      const batchesWithPrompt = fetchedBatches.map(b => {
+        const promptData = b.prompts as { text: string } | { text: string }[] | null;
+        let promptText = "Multiple prompts";
+        if (promptData) {
+          if (Array.isArray(promptData)) {
+            promptText = promptData[0]?.text || "Multiple prompts";
+          } else {
+            promptText = promptData.text || "Multiple prompts";
+          }
+        }
+        return {
+          ...b,
+          prompt_text: promptText,
+        };
+      });
 
       setBatches(batchesWithPrompt);
 
