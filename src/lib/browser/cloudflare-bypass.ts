@@ -92,7 +92,7 @@ export async function waitForCloudflareChallenge(
             
             return hasContent && hasScripts;
           });
-        } catch (evalError) {
+        } catch {
           // If evaluation fails, page might be closed or navigating
           if (page.isClosed()) {
             console.warn('[CloudflareBypass] Page closed during evaluation');
@@ -136,7 +136,7 @@ export async function waitForCloudflareChallenge(
                 }, opts.checkInterval);
               }),
             ]);
-          } catch (timeoutError) {
+          } catch {
             // If page closes during wait, exit
             if (page.isClosed()) {
               console.warn('[CloudflareBypass] Page closed during wait');
@@ -263,6 +263,7 @@ export async function handleCloudflareChallenge(
           return true;
         }
       } catch (error) {
+        console.warn('[CloudflareBypass] Error verifying challenge state:', error);
         // If we can't check, assume challenge is resolved if page is still open
         if (!page.isClosed()) {
           return true;
@@ -322,10 +323,12 @@ export function setupCloudflareInterception(page: Page): void {
   });
 }
 
-export default {
+const cloudflareBypass = {
   waitForCloudflareChallenge,
   isCloudflareChallenge,
   handleCloudflareChallenge,
   setupCloudflareInterception,
 };
+
+export default cloudflareBypass;
 

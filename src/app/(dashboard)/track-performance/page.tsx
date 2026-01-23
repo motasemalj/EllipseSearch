@@ -1,6 +1,5 @@
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
-import { SupportedEngine } from "@/types";
 import { TrackPerformanceClient } from "./track-performance-client";
 
 interface SimulationData {

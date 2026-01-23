@@ -18,7 +18,6 @@ import path from 'path';
 import type { BrowserContext } from 'playwright';
 import type { SupportedEngine } from '@/types';
 import { BrowserFingerprint, FingerprintGenerator, getFingerprintGenerator } from './fingerprint-generator';
-import { ProxyConfig } from './proxy-manager';
 
 // ===========================================
 // Types
@@ -175,7 +174,7 @@ export class ProfileManager {
           }
           
           this.profiles.set(profile.id, profile);
-        } catch (e) {
+        } catch {
           console.warn(`[ProfileManager] Failed to load profile: ${file}`);
         }
       }
@@ -414,7 +413,7 @@ export class ProfileManager {
     const maxAge = this.config.rotateAfterDays * 24 * 60 * 60 * 1000;
     const now = Date.now();
     
-    for (const [id, profile] of this.profiles.entries()) {
+    for (const [id, profile] of Array.from(this.profiles.entries())) {
       const age = now - new Date(profile.created).getTime();
       
       if (!profile.isHealthy || age > maxAge) {

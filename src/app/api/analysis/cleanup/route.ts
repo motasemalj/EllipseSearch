@@ -50,9 +50,16 @@ export async function POST(request: NextRequest) {
     }
 
     // Filter to only batches in user's organization
-    const userBatches = (stuckBatches || []).filter(
-      b => (b.brands as { organization_id: string } | null)?.organization_id === profile.organization_id
-    );
+    const userBatches = (stuckBatches || []).filter((batch) => {
+      const brands = batch.brands as
+        | { organization_id?: string | null }
+        | { organization_id?: string | null }[]
+        | null;
+      const organizationId = Array.isArray(brands)
+        ? brands[0]?.organization_id
+        : brands?.organization_id;
+      return organizationId === profile.organization_id;
+    });
 
     if (userBatches.length === 0) {
       return NextResponse.json({ 

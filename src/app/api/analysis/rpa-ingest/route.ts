@@ -372,7 +372,7 @@ async function handlePromptCompleted(
   }
   
   // ENHANCED: Try to extract meaningful content from both HTML and text
-  let responseHtml = result.response_html || "";
+  const responseHtml = result.response_html || "";
   let responseText = result.response_text || "";
   
   // If we have HTML but text is short/empty, try to extract text from HTML

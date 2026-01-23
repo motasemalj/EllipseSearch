@@ -12,10 +12,10 @@
  * - Advanced stealth to avoid detection
  */
 
-import type { Page, BrowserContext } from 'playwright';
+import type { Page } from 'playwright';
 import type { SupportedRegion } from '@/types';
-import { ENGINE_SELECTORS, type BrowserOptions, type BrowserCaptureResult } from '../types';
-import { BaseBrowserEngine, type EngineSimulationInput } from './base-engine';
+import { ENGINE_SELECTORS } from '../types';
+import { BaseBrowserEngine } from './base-engine';
 import { humanType, humanClick, humanWait, humanScroll } from '../stealth';
 import { bypassCloudflare, hasCloudflareChallenge } from '../advanced-cloudflare-bypass';
 
@@ -83,6 +83,8 @@ export class ChatGPTBrowserEngine extends BaseBrowserEngine {
    * Override: ChatGPT has unique URL structure
    */
   protected getUrlWithRegion(baseUrl: string, region: SupportedRegion): string {
+    void baseUrl;
+    void region;
     // ChatGPT now uses chatgpt.com domain
     // Default to GPT-4 for search capability
     return `https://chatgpt.com/?model=gpt-4`;
@@ -136,7 +138,11 @@ export class ChatGPTBrowserEngine extends BaseBrowserEngine {
     // Wait for React to hydrate (ChatGPT is a React app)
     await page.waitForFunction(() => {
       // Check if React has loaded
-      return !!(window as any).React || !!(window as any).__REACT_DEVTOOLS_GLOBAL_HOOK__;
+      const windowWithReact = window as Window & {
+        React?: unknown;
+        __REACT_DEVTOOLS_GLOBAL_HOOK__?: unknown;
+      };
+      return !!windowWithReact.React || !!windowWithReact.__REACT_DEVTOOLS_GLOBAL_HOOK__;
     }, { timeout: 15000 }).catch(() => {
       console.warn('[ChatGPT] React check timeout, continuing anyway');
     });
@@ -166,7 +172,6 @@ export class ChatGPTBrowserEngine extends BaseBrowserEngine {
     ];
     
     let inputFound = false;
-    let lastError: Error | null = null;
     
     for (const selector of inputSelectors) {
       try {
@@ -177,8 +182,7 @@ export class ChatGPTBrowserEngine extends BaseBrowserEngine {
         console.log(`[ChatGPT] Found prompt input with selector: ${selector}`);
         inputFound = true;
         break;
-      } catch (error) {
-        lastError = error as Error;
+      } catch {
         // Try next selector
       }
     }
@@ -392,13 +396,13 @@ export class ChatGPTBrowserEngine extends BaseBrowserEngine {
     await humanWait(page, 800, 0.4);
 
     // Submit with slight delay
-    await this.submitPromptHumanLike(page);
+    await this.submitChatGPTPrompt(page);
   }
   
   /**
-   * Submit with human-like behavior
+   * Submit with human-like behavior (ChatGPT-specific)
    */
-  private async submitPromptHumanLike(page: Page): Promise<void> {
+  private async submitChatGPTPrompt(page: Page): Promise<void> {
     // Try button first
     const submitButton = page.locator(CHATGPT_SELECTORS.submit_button);
     

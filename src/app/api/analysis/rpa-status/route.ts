@@ -155,7 +155,6 @@ export async function POST(request: NextRequest) {
       worker_id, 
       chrome_connected = true, 
       engines_ready = ["chatgpt"],
-      status, 
       jobs_processed, 
       jobs_failed 
     } = body;

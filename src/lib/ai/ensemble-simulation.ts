@@ -26,7 +26,6 @@ import {
   ENSEMBLE_RUN_COUNT, 
   BRAND_CONFIDENCE_THRESHOLDS,
   DEFAULT_BROWSER_SIMULATION_MODE,
-  BROWSER_MODE_ENABLED,
   type BrowserSimulationMode,
 } from "@/lib/ai/openai-config";
 import type {

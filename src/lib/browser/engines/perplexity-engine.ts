@@ -66,6 +66,7 @@ export class PerplexityBrowserEngine extends BaseBrowserEngine {
    * Override: Perplexity URL handling
    */
   protected getUrlWithRegion(baseUrl: string, region: SupportedRegion): string {
+    void region;
     // Perplexity doesn't have explicit region URLs, use query params
     return `${baseUrl}/search`;
   }
@@ -123,22 +124,11 @@ export class PerplexityBrowserEngine extends BaseBrowserEngine {
 
     // Check for login modal or buttons
     const hasLoginPrompt = await page.evaluate(() => {
-      const loginPatterns = [
-        'button:has-text("Sign in")',
-        'button:has-text("Log in")',
-        '[class*="login-modal"]',
-        '[class*="auth-modal"]',
-      ];
-      
-      for (const pattern of loginPatterns) {
-        try {
-          const modal = document.querySelector('[class*="modal"]');
-          if (modal && (modal.textContent?.includes('Sign in') || modal.textContent?.includes('Log in'))) {
-            return true;
-          }
-        } catch {}
-      }
-      return false;
+      const modal = document.querySelector('[class*="modal"]');
+      return !!(modal && (
+        modal.textContent?.includes('Sign in') ||
+        modal.textContent?.includes('Log in')
+      ));
     });
 
     return hasLoginPrompt;

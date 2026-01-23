@@ -55,7 +55,6 @@ export async function POST(request: NextRequest) {
       language,
       region = "global",
       simulation_mode = "browser",
-      use_authenticated_sessions = false,
     } = body as {
       brand_id: string;
       prompt_set_id?: string;
@@ -64,7 +63,6 @@ export async function POST(request: NextRequest) {
       language: SupportedLanguage;
       region?: SupportedRegion;
       simulation_mode?: SimulationMode;
-      use_authenticated_sessions?: boolean;
     };
 
     // Validate required fields

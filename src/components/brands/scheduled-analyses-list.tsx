@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -25,7 +25,6 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { toast } from "sonner";
-import { createClient } from "@/lib/supabase/client";
 import type { SupportedEngine } from "@/types";
 
 interface ScheduledAnalysis {
@@ -71,11 +70,7 @@ export function ScheduledAnalysesList({ brandId }: ScheduledAnalysesListProps) {
   const [isDeleting, setIsDeleting] = useState(false);
   const [togglingId, setTogglingId] = useState<string | null>(null);
 
-  useEffect(() => {
-    fetchSchedules();
-  }, [brandId]);
-
-  const fetchSchedules = async () => {
+  const fetchSchedules = useCallback(async () => {
     setIsLoading(true);
     try {
       const response = await fetch(`/api/analysis/schedules?brand_id=${brandId}`);
@@ -89,7 +84,11 @@ export function ScheduledAnalysesList({ brandId }: ScheduledAnalysesListProps) {
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [brandId]);
+
+  useEffect(() => {
+    fetchSchedules();
+  }, [fetchSchedules]);
 
   const handleToggleActive = async (schedule: ScheduledAnalysis) => {
     setTogglingId(schedule.id);

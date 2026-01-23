@@ -534,10 +534,10 @@ export async function createContextWithSession(
   const storage = getSessionStorage();
   const storageState = await storage.getStorageStateForContext(engine, userId);
   
-  const contextOptions: Parameters<typeof browser.newContext>[0] = {};
+  const contextOptions: NonNullable<Parameters<typeof browser.newContext>[0]> = {};
   
   if (storageState) {
-    contextOptions.storageState = storageState as Parameters<typeof browser.newContext>[0]['storageState'];
+    contextOptions.storageState = storageState as NonNullable<Parameters<typeof browser.newContext>[0]>['storageState'];
   }
   
   const context = await browser.newContext(contextOptions);

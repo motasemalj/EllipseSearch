@@ -18,7 +18,7 @@ const plans = [
     features: [
       `${TIER_LIMITS.starter.monthly_credits.toLocaleString()} credits/month`,
       `Up to ${TIER_LIMITS.starter.max_brands} brands`,
-      `${TIER_LIMITS.starter.max_keywords_per_brand} keywords per brand`,
+      `${TIER_LIMITS.starter.max_prompts_per_brand} prompts per brand`,
       "All 4 AI engines",
       "English + Arabic support",
       "Selection signal analysis",
@@ -35,7 +35,7 @@ const plans = [
     features: [
       `${TIER_LIMITS.pro.monthly_credits.toLocaleString()} credits/month`,
       `Up to ${TIER_LIMITS.pro.max_brands} brands`,
-      `${TIER_LIMITS.pro.max_keywords_per_brand} keywords per brand`,
+      `${TIER_LIMITS.pro.max_prompts_per_brand} prompts per brand`,
       "All 4 AI engines",
       "English + Arabic support",
       "Selection signal analysis",
@@ -54,7 +54,7 @@ const plans = [
     features: [
       `${TIER_LIMITS.agency.monthly_credits.toLocaleString()} credits/month`,
       `Up to ${TIER_LIMITS.agency.max_brands} brands`,
-      `${TIER_LIMITS.agency.max_keywords_per_brand} keywords per brand`,
+      `${TIER_LIMITS.agency.max_prompts_per_brand} prompts per brand`,
       "All 4 AI engines",
       "English + Arabic support",
       "Selection signal analysis",

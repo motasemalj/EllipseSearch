@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { tasks } from "@trigger.dev/sdk/v3";
-import type { RunAnalysisInput, SupportedEngine, SupportedLanguage, SupportedRegion, SimulationMode } from "@/types";
+import type { RunAnalysisInput, SupportedEngine, SupportedLanguage, SupportedRegion } from "@/types";
 import { isRpaAvailable } from "@/lib/rpa/status";
 
 export async function POST(request: NextRequest) {
@@ -41,7 +41,6 @@ export async function POST(request: NextRequest) {
       language,
       region = "global", // Default to global if not specified
       enable_hallucination_watchdog,
-      simulation_mode: requestedMode, // May be undefined, we'll use env default
       schedule, // New: schedule frequency for recurring analysis
     } = body as {
       brand_id: string;
@@ -52,7 +51,6 @@ export async function POST(request: NextRequest) {
       language: SupportedLanguage;
       region?: SupportedRegion;
       enable_hallucination_watchdog?: boolean;
-      simulation_mode?: SimulationMode;
       schedule?: 'daily' | 'weekly' | 'biweekly' | 'monthly';
     };
     
@@ -331,7 +329,7 @@ export async function POST(request: NextRequest) {
     if (schedule) {
       // Calculate next run time based on frequency
       const now = new Date();
-      let nextRunAt = new Date(now);
+      const nextRunAt = new Date(now);
       
       switch (schedule) {
         case 'daily':

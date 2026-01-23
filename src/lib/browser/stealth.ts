@@ -129,8 +129,8 @@ function randomFloat(min: number, max: number): number {
 // Stealth Launch Options
 // ===========================================
 
-export function getStealthLaunchOptions(config: StealthConfig = {}): LaunchOptions {
-  const mergedConfig = { ...DEFAULT_STEALTH_CONFIG, ...config };
+export function getStealthLaunchOptions(_config: StealthConfig = {}): LaunchOptions {
+  void _config;
   
   // Use non-headless if specified (sometimes helps bypass detection)
   const headless = process.env.BROWSER_HEADLESS !== 'false';
@@ -448,7 +448,7 @@ export async function applyStealthToContext(
   const pages = context.pages();
   for (const page of pages) {
     try {
-      const client = await (page as any).context().newCDPSession(page);
+      const client = await context.newCDPSession(page);
       
       // Hide webdriver property via CDP
       await client.send('Page.addScriptToEvaluateOnNewDocument', {
@@ -478,11 +478,11 @@ export async function applyStealthToContext(
       
       // Override User-Agent metadata
       await client.send('Network.setUserAgentOverride', {
-        userAgent: context.userAgent || REAL_USER_AGENTS[0],
+        userAgent: REAL_USER_AGENTS[0],
         acceptLanguage: 'en-US,en;q=0.9',
         platform: 'Win32',
       });
-    } catch (error) {
+    } catch {
       // CDP might not be available in all contexts, continue without it
       console.warn('[Stealth] CDP commands not available, using JavaScript only');
     }
@@ -584,8 +584,9 @@ export async function humanType(
 export async function humanMouseMove(
   page: Page,
   selector: string,
-  config: StealthConfig = {}
+  _config: StealthConfig = {}
 ): Promise<void> {
+  void _config;
   const element = page.locator(selector);
   const box = await element.boundingBox();
   
@@ -597,8 +598,8 @@ export async function humanMouseMove(
   
   // Get current mouse position (approximate from viewport center)
   const viewport = page.viewportSize() || { width: 1920, height: 1080 };
-  let currentX = viewport.width / 2 + randomBetween(-100, 100);
-  let currentY = viewport.height / 2 + randomBetween(-100, 100);
+  const currentX = viewport.width / 2 + randomBetween(-100, 100);
+  const currentY = viewport.height / 2 + randomBetween(-100, 100);
   
   // Move in small steps with slight curve
   const steps = randomBetween(15, 30);

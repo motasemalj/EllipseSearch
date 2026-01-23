@@ -32,7 +32,6 @@ import {
   waitForStreamingComplete, 
   typeWithHumanDelay 
 } from '../dom-parser';
-import { getRegionInfo } from '@/types';
 import {
   humanType,
   humanClick,
@@ -41,7 +40,6 @@ import {
   applyStealthToPage,
 } from '../stealth';
 import {
-  getSessionStorage,
   captureSession,
 } from '../session-storage';
 import {
@@ -202,6 +200,7 @@ export abstract class BaseBrowserEngine {
       return result;
 
     } catch (error) {
+      console.warn(`[${this.engine}] Navigation error:`, error);
       console.error(`[${this.engine}] Simulation error:`, error);
       throw error;
     } finally {
@@ -227,6 +226,7 @@ export abstract class BaseBrowserEngine {
         timeout: 90000, // Increased timeout for proxy + Cloudflare challenges
       });
     } catch (error) {
+      console.warn(`[${this.engine}] Navigation failed:`, error);
       // If navigation fails, try to handle Cloudflare challenge
       if (this.engine === 'chatgpt' && !page.isClosed()) {
         const { hasCloudflareChallenge, bypassCloudflare } = await import('../advanced-cloudflare-bypass');
@@ -266,6 +266,7 @@ export abstract class BaseBrowserEngine {
    * Get URL with region-specific parameters
    */
   protected getUrlWithRegion(baseUrl: string, region: SupportedRegion): string {
+    void region;
     // Default implementation - override in specific engines
     return baseUrl;
   }
@@ -467,6 +468,7 @@ export abstract class BaseBrowserEngine {
    * Engine-specific initialization (override in subclasses)
    */
   protected async engineSpecificInit(page: Page): Promise<void> {
+    void page;
     // Default: no-op
   }
 }

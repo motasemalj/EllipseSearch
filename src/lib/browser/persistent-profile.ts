@@ -10,7 +10,7 @@
  * This allows manual verification once, then automated reuse.
  */
 
-import { chromium, type Browser, type BrowserContext, type Page } from 'playwright';
+import { chromium, type BrowserContext, type Page } from 'playwright';
 import * as fs from 'fs';
 import * as path from 'path';
 import { SupportedEngine } from '@/types';
@@ -98,10 +98,11 @@ export async function launchWithPersistentProfile(
     headless?: boolean;
     proxy?: { server: string; username?: string; password?: string };
   } = {}
-): Promise<{ browser: Browser; context: BrowserContext; page: Page }> {
+): Promise<{ browser: BrowserContext; context: BrowserContext; page: Page }> {
   const userDataDir = getProfileDir(engine);
   
-  const browser = await chromium.launchPersistentContext(userDataDir, {
+  // Note: launchPersistentContext returns a BrowserContext (not Browser)
+  const context = await chromium.launchPersistentContext(userDataDir, {
     headless: options.headless ?? false, // Default to non-headless for verification
     channel: 'chrome', // Use real Chrome if available
     args: [
@@ -127,13 +128,25 @@ export async function launchWithPersistentProfile(
   });
   
   // Get or create a page
-  let page = browser.pages()[0];
+  let page = context.pages()[0];
   if (!page) {
-    page = await browser.newPage();
+    page = await context.newPage();
   }
   
   // Apply stealth scripts
-  await browser.addInitScript(() => {
+  await context.addInitScript(() => {
+    const windowWithAutomation = window as Window & {
+      chrome?: {
+        runtime?: unknown;
+        loadTimes?: () => void;
+        csi?: () => void;
+        app?: unknown;
+      };
+      __playwright?: unknown;
+      __puppeteer?: unknown;
+      __selenium?: unknown;
+    };
+
     // Remove webdriver property
     Object.defineProperty(navigator, 'webdriver', {
       get: () => undefined,
@@ -145,7 +158,7 @@ export async function launchWithPersistentProfile(
     });
     
     // Chrome runtime
-    (window as any).chrome = {
+    windowWithAutomation.chrome = {
       runtime: {},
       loadTimes: function() {},
       csi: function() {},
@@ -153,12 +166,13 @@ export async function launchWithPersistentProfile(
     };
     
     // Remove automation indicators
-    delete (window as any).__playwright;
-    delete (window as any).__puppeteer;
-    delete (window as any).__selenium;
+    delete windowWithAutomation.__playwright;
+    delete windowWithAutomation.__puppeteer;
+    delete windowWithAutomation.__selenium;
   });
   
-  return { browser, context: browser, page };
+  // Return context as both browser and context for compatibility
+  return { browser: context, context, page };
 }
 
 /**
@@ -219,7 +233,7 @@ export async function runInteractiveVerification(
   }
 }
 
-export default {
+const persistentProfile = {
   getProfileDir,
   hasVerifiedProfile,
   markProfileVerified,
@@ -227,4 +241,6 @@ export default {
   launchWithPersistentProfile,
   runInteractiveVerification,
 };
+
+export default persistentProfile;
 

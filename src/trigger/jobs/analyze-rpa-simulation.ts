@@ -51,11 +51,8 @@ export const analyzeRpaSimulation = task({
     const { 
       simulation_id, 
       brand_id, 
-      prompt_id, 
       analysis_batch_id,
       engine,
-      language,
-      region,
     } = payload;
     
     const supabase = getSupabase();
@@ -160,7 +157,7 @@ export const analyzeRpaSimulation = task({
       
       if (!crawlAnalysis) {
         console.log(`[RPA Analysis] No crawl data - triggering auto-crawl...`);
-        crawlAnalysis = await triggerAutoCrawlIfNeeded(supabase, brand_id, brand);
+        crawlAnalysis = await triggerAutoCrawlIfNeeded(supabase, brand_id, brand) ?? undefined;
       }
       
       // Enhance with tiered recommendations

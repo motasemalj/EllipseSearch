@@ -8,15 +8,12 @@ import {
   CheckCircle2, 
   Eye, 
   EyeOff, 
-  Clock, 
   ChevronRight,
   History,
   Search,
   Loader2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { Progress } from "@/components/ui/progress";
 import { ChatGPTIcon, PerplexityIcon, GeminiIcon, GrokIcon } from "@/components/ui/engine-badge";
 import { SupportedEngine } from "@/types";
 

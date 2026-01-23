@@ -45,16 +45,6 @@ interface BrandContext {
   unique_selling_points: string[];
 }
 
-interface Brand {
-  id: string;
-  name: string;
-  domain: string;
-  primary_location: string | null;
-  languages: string[];
-  brand_aliases: string[];
-  settings: Record<string, unknown>;
-}
-
 export default function EditBrandPage() {
   const router = useRouter();
   const params = useParams();

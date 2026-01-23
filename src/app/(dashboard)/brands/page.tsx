@@ -3,7 +3,6 @@ import { getCurrentUser, getUserProfile, getCachedBrands, getCachedSimulations }
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Plus } from "lucide-react";
-import { BrandCard } from "@/components/dashboard/brand-card";
 import { Brand, SupportedEngine } from "@/types";
 import { BrandsFilters } from "./brands-filters";
 

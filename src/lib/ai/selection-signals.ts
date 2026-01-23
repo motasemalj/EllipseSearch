@@ -281,7 +281,7 @@ Return your analysis as valid JSON only.`;
 
   // Sanitize and prepare the response for analysis
   // Remove potentially problematic characters that might cause OpenAI issues
-  let sanitizedResponse = responseForAnalysis
+  const sanitizedResponse = responseForAnalysis
     // Remove null bytes and control characters (except newlines and tabs)
     .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '')
     // Normalize whitespace
@@ -422,7 +422,8 @@ IMPORTANT RULES:
       
       console.log(`[SelectionSignals] Got ${content.length} chars of content, parsing JSON...`);
 
-      const parsed = parseJsonFromContent(content);
+      const parsed = parseJsonFromContent(content) as Record<string, unknown>;
+      const gapAnalysis = (parsed.gap_analysis ?? {}) as Record<string, unknown>;
 
     // Validate and normalize the response
     return {
@@ -432,11 +433,11 @@ IMPORTANT RULES:
         ? parsed.winning_sources
         : [],
       gap_analysis: {
-        structure_score: clampScore(parsed.gap_analysis?.structure_score),
-        data_density_score: clampScore(parsed.gap_analysis?.data_density_score),
-        directness_score: clampScore(parsed.gap_analysis?.directness_score),
-        authority_score: clampScore(parsed.gap_analysis?.authority_score || 3),
-        crawlability_score: clampScore(parsed.gap_analysis?.crawlability_score || 3),
+        structure_score: clampScore(gapAnalysis.structure_score),
+        data_density_score: clampScore(gapAnalysis.data_density_score),
+        directness_score: clampScore(gapAnalysis.directness_score),
+        authority_score: clampScore(gapAnalysis.authority_score ?? 3),
+        crawlability_score: clampScore(gapAnalysis.crawlability_score ?? 3),
       },
       action_items: validateActionItems(parsed.action_items),
       competitor_insights: String(parsed.competitor_insights || ""),
@@ -630,7 +631,7 @@ function stripHtmlToText(html: string): string {
   return withoutTags.replace(/\s+/g, " ").trim();
 }
 
-function parseJsonFromContent(content: string): any {
+function parseJsonFromContent(content: string): unknown {
   const trimmed = content.trim();
   const unfenced = trimmed
     .replace(/^```(?:json)?/i, "")

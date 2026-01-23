@@ -93,7 +93,26 @@ export async function GET(request: NextRequest) {
     }
     
     // Transform to RPA-friendly format
-    const pendingJobs = (simulations || []).map((sim: any) => ({
+    type PendingSimulation = {
+      id: string;
+      prompt_id: string;
+      prompt_text: string;
+      engine: string;
+      language: string;
+      region: string;
+      analysis_batch_id: string;
+      brand_id: string;
+      brands?: Array<{
+        id?: string;
+        domain?: string | null;
+        name?: string | null;
+        brand_aliases?: string[] | null;
+      }> | null;
+    };
+
+    const pendingJobs = (simulations || []).map((sim: PendingSimulation) => {
+      const brand = sim.brands?.[0];
+      return {
       simulation_id: sim.id,
       prompt_id: sim.prompt_id,
       prompt_text: sim.prompt_text,
@@ -102,10 +121,11 @@ export async function GET(request: NextRequest) {
       region: sim.region,
       analysis_batch_id: sim.analysis_batch_id,
       brand_id: sim.brand_id,
-      brand_domain: sim.brands?.domain || "",
-      brand_name: sim.brands?.name || "",
-      brand_aliases: sim.brands?.brand_aliases || [],
-    }));
+      brand_domain: brand?.domain || "",
+      brand_name: brand?.name || "",
+      brand_aliases: brand?.brand_aliases || [],
+      };
+    });
     
     console.log(`[RPA Pending] Returning ${pendingJobs.length} pending jobs`);
     

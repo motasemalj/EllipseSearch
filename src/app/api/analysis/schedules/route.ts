@@ -94,7 +94,13 @@ export async function DELETE(request: NextRequest) {
       .eq("id", user.id)
       .single();
 
-    const brandOrg = (schedule.brands as { organization_id: string } | null)?.organization_id;
+    const brands = schedule.brands as
+      | { organization_id?: string | null }
+      | { organization_id?: string | null }[]
+      | null;
+    const brandOrg = Array.isArray(brands)
+      ? brands[0]?.organization_id
+      : brands?.organization_id;
     if (brandOrg !== profile?.organization_id) {
       return NextResponse.json({ error: "Access denied" }, { status: 403 });
     }
@@ -153,7 +159,13 @@ export async function PATCH(request: NextRequest) {
       .eq("id", user.id)
       .single();
 
-    const brandOrg = (schedule.brands as { organization_id: string } | null)?.organization_id;
+    const brands = schedule.brands as
+      | { organization_id?: string | null }
+      | { organization_id?: string | null }[]
+      | null;
+    const brandOrg = Array.isArray(brands)
+      ? brands[0]?.organization_id
+      : brands?.organization_id;
     if (brandOrg !== profile?.organization_id) {
       return NextResponse.json({ error: "Access denied" }, { status: 403 });
     }

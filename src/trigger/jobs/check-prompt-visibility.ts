@@ -390,7 +390,7 @@ export const checkPromptVisibility = task({
       // 8. Run full selection signal analysis
       const selectionSignals = await analyzeSelectionSignals({
         answer_html: simulationResult.answer_html,
-        answer_text: simulationResult.answer_text,
+        answer_text: (simulationResult as { answer_text?: string }).answer_text,
         search_context: simulationResult.search_context || null,
         brand_domain: brand.domain,
         brand_aliases: brand.brand_aliases || [],
@@ -581,7 +581,7 @@ export const checkPromptVisibility = task({
         console.log(`⚠️ No crawl analysis available - attempting auto-crawl...`);
         
         // AUTO-CRAWL: Trigger website crawl if no crawl data exists
-        crawlAnalysis = await triggerAutoCrawlIfNeeded(supabase, brand_id, brand);
+        crawlAnalysis = await triggerAutoCrawlIfNeeded(supabase, brand_id, brand) ?? undefined;
         
         if (crawlAnalysis) {
           console.log(`✓ Auto-crawl completed! Using fresh crawl data.`);

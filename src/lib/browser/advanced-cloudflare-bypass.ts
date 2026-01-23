@@ -10,7 +10,7 @@
  * 6. Retry with different strategies
  */
 
-import type { Page, BrowserContext, CDPSession } from 'playwright';
+import type { Page, BrowserContext } from 'playwright';
 
 export interface BypassStrategy {
   name: string;
@@ -77,7 +77,7 @@ async function cdpStealthStrategy(page: Page, context: BrowserContext): Promise<
     // Grant permissions
     await client.send('Browser.grantPermissions', {
       origin: page.url(),
-      permissions: ['geolocation', 'notifications', 'camera', 'microphone'],
+      permissions: ['geolocation', 'notifications'],
     });
     
     // Disable automation flags
@@ -107,7 +107,7 @@ async function headerManipulationStrategy(page: Page, context: BrowserContext): 
     // Intercept and modify requests
     await context.route('**/*', async (route) => {
       const request = route.request();
-      const headers = {
+      const headers: Record<string, string> = {
         ...request.headers(),
         'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
         'Accept-Language': 'en-US,en;q=0.9',
@@ -142,6 +142,7 @@ async function headerManipulationStrategy(page: Page, context: BrowserContext): 
  * Strategy 3: Wait and retry with exponential backoff
  */
 async function waitAndRetryStrategy(page: Page, context: BrowserContext): Promise<boolean> {
+  void context;
   const maxAttempts = 5;
   const baseDelay = 3000;
   
@@ -199,6 +200,7 @@ async function waitAndRetryStrategy(page: Page, context: BrowserContext): Promis
  * Strategy 4: Navigate away and back (sometimes resets challenge)
  */
 async function navigateResetStrategy(page: Page, context: BrowserContext): Promise<boolean> {
+  void context;
   try {
     const currentUrl = page.url();
     
@@ -227,6 +229,7 @@ async function navigateResetStrategy(page: Page, context: BrowserContext): Promi
  * Strategy 5: Solve JavaScript challenge (if present)
  */
 async function jsChallengeStrategy(page: Page, context: BrowserContext): Promise<boolean> {
+  void context;
   try {
     // Wait for any JavaScript challenges to execute
     await page.waitForTimeout(5000);
@@ -400,7 +403,15 @@ export async function hasCloudflareChallenge(page: Page): Promise<boolean> {
   }
 }
 
-export default {
+export {
+  cdpStealthStrategy,
+  headerManipulationStrategy,
+  waitAndRetryStrategy,
+  navigateResetStrategy,
+  jsChallengeStrategy,
+};
+
+const advancedCloudflareBypass = {
   bypassCloudflare,
   hasCloudflareChallenge,
   cdpStealthStrategy,
@@ -409,4 +420,6 @@ export default {
   navigateResetStrategy,
   jsChallengeStrategy,
 };
+
+export default advancedCloudflareBypass;
 

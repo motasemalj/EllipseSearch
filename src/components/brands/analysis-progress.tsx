@@ -5,7 +5,6 @@ import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { Loader2, Eye, EyeOff, AlertCircle, Timer, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -42,21 +41,6 @@ const engineIcons: Record<SupportedEngine, React.ReactNode> = {
   gemini: <GeminiIcon className="w-4 h-4" />,
   grok: <GrokIcon className="w-4 h-4" />,
 };
-
-function estimateTimeRemaining(remaining: number): string {
-  if (remaining === 0) return "Finishing up...";
-  const minSeconds = remaining * 15;
-  const maxSeconds = remaining * 30;
-  
-  if (minSeconds < 60) return "Less than 1 minute";
-  if (maxSeconds < 120) return "~1-2 minutes";
-  
-  const minMinutes = Math.ceil(minSeconds / 60);
-  const maxMinutes = Math.ceil(maxSeconds / 60);
-  
-  if (maxMinutes <= 5) return `~${minMinutes}-${maxMinutes} min`;
-  return `~${minMinutes}-${maxMinutes} min`;
-}
 
 export function AnalysisProgress({ brandId }: AnalysisProgressProps) {
   const router = useRouter();
@@ -259,9 +243,6 @@ export function AnalysisProgress({ brandId }: AnalysisProgressProps) {
         {/* Batches - Compact Single-Row List */}
         <div className="divide-y divide-border">
           {batches.map((batch) => {
-            const progress = batch.total_simulations > 0 
-              ? Math.round((batch.completed_simulations / batch.total_simulations) * 100) 
-              : 0;
             const visibility = batchVisibility[batch.id] || { visible: 0, notVisible: 0 };
             const elapsedSeconds = Math.round((Date.now() - new Date(batch.created_at).getTime()) / 1000);
             const elapsedFormatted = elapsedSeconds < 60 

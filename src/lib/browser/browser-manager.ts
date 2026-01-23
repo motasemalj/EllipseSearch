@@ -32,16 +32,13 @@ import {
   getStealthLaunchOptions,
   generateStealthContext,
   applyStealthToContext,
-  type StealthConfig,
 } from './stealth';
 import { getSessionStorage } from './session-storage';
-import { getAuthFlow, type AuthCredentials as AuthFlowCredentials } from './auth-flows';
 import { getAuthCredentials, hasCredentials } from './config';
 
 // NEW: Import advanced anti-detection modules
 import { getProxyManager, hasProxySupport, type ProxyConfig } from './proxy-manager';
 import { getFingerprintGenerator, getFingerprintScript, type BrowserFingerprint } from './fingerprint-generator';
-import { getHumanBehavior } from './human-behavior';
 import { getProfileManager, type BrowserProfile } from './profile-manager';
 import { getRateLimiter } from './rate-limiter';
 
@@ -279,7 +276,7 @@ export class BrowserPool {
         'Upgrade-Insecure-Requests': '1',
       },
       // Restore session state if available
-      storageState: existingSession as Parameters<typeof browser.newContext>[0]['storageState'],
+      storageState: existingSession as NonNullable<Parameters<typeof browser.newContext>[0]>['storageState'],
       // Ignore SSL errors when using proxy (proxies often use self-signed certs)
       ignoreHTTPSErrors: !!proxy,
     };

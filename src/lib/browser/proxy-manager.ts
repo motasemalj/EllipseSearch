@@ -194,7 +194,7 @@ export class ProxyManager {
           this.addCustomProxy(proxy);
         }
         console.log(`[ProxyManager] Loaded ${customProxies.length} custom proxies`);
-      } catch (e) {
+      } catch {
         console.warn('[ProxyManager] Failed to parse CUSTOM_PROXY_LIST');
       }
     }
@@ -205,7 +205,7 @@ export class ProxyManager {
    */
   async initialize(): Promise<void> {
     // Generate proxy configurations for each provider
-    for (const [provider, creds] of this.credentials.entries()) {
+    for (const [provider, creds] of Array.from(this.credentials.entries())) {
       const count = Math.ceil(this.config.poolSize / this.credentials.size);
       await this.generateProxiesForProvider(provider, creds, count);
     }

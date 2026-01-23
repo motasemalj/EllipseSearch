@@ -68,6 +68,7 @@ export class GrokBrowserEngine extends BaseBrowserEngine {
    * Override: Grok URL
    */
   protected getUrlWithRegion(baseUrl: string, region: SupportedRegion): string {
+    void region;
     // Grok doesn't have region-specific URLs
     return baseUrl;
   }

@@ -13,8 +13,8 @@
 
 import type { Page, BrowserContext } from 'playwright';
 import type { SupportedEngine } from '@/types';
-import { stealth, humanType, humanClick, humanWait } from './stealth';
-import { getSessionStorage, captureSession } from './session-storage';
+import { humanType, humanClick, humanWait } from './stealth';
+import { captureSession } from './session-storage';
 
 // ===========================================
 // Types
@@ -442,6 +442,8 @@ class PerplexityAuthFlow extends BaseAuthFlow {
     page: Page,
     credentials: AuthCredentials
   ): Promise<AuthResult> {
+    void page;
+    void credentials;
     // Perplexity uses a visitor ID and auth tokens
     if (!credentials.session_token) {
       return { success: false, error: 'No session token provided' };
@@ -533,6 +535,8 @@ class GeminiAuthFlow extends BaseAuthFlow {
     page: Page,
     credentials: AuthCredentials
   ): Promise<AuthResult> {
+    void page;
+    void credentials;
     // Gemini uses Google auth cookies
     return { success: false, error: 'Use cookie injection for Gemini (Google cookies required)' };
   }
@@ -785,9 +789,11 @@ export async function isEngineAuthenticated(
   return authFlow.isAuthenticated(page);
 }
 
-export default {
+const authFlows = {
   getAuthFlow,
   authenticateEngine,
   isEngineAuthenticated,
 };
+
+export default authFlows;
 
