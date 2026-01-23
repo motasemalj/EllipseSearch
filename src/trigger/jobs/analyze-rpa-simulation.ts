@@ -16,7 +16,20 @@ import {
   analyzeSelectionSignals,
   enhanceWithTieredRecommendations,
 } from "@/lib/ai/selection-signals";
-import type { SupportedEngine, SupportedLanguage, SupportedRegion } from "@/types";
+import { 
+  detectHallucinations,
+  detectNegativeHallucination,
+  type GroundTruthData,
+  type HallucinationResult,
+} from "@/lib/ai/hallucination-detector";
+import { generateSchemaFix } from "@/lib/ai/schema-generator";
+import type { 
+  SupportedEngine, 
+  SupportedLanguage, 
+  SupportedRegion,
+  ActionItem,
+  DetectedHallucination,
+} from "@/types";
 import type { CrawlAnalysis } from "@/lib/ai/crawl-analyzer";
 
 // Create Supabase client with service role
@@ -148,6 +161,126 @@ export const analyzeRpaSimulation = task({
       
       console.log(`[RPA Analysis] GPT analysis complete: visible=${selectionSignals.is_visible}, sentiment=${selectionSignals.sentiment}`);
       
+      // 3.6 Hallucination Watchdog (if enabled)
+      const enableHallucinationWatchdog = (simulation.selection_signals as { hallucination_watchdog?: { enabled?: boolean } } | null)
+        ?.hallucination_watchdog?.enabled === true;
+
+      let groundTruthContent: string | undefined;
+      let structuredGroundTruth: GroundTruthData | undefined;
+      
+      if (enableHallucinationWatchdog && brand.last_crawled_at) {
+        const { data: crawledPages } = await supabase
+          .from("crawled_pages")
+          .select("title, content_excerpt, url")
+          .eq("brand_id", brand_id)
+          .order("created_at", { ascending: false })
+          .limit(15);
+
+        if (crawledPages && crawledPages.length > 0) {
+          groundTruthContent = crawledPages
+            .map(page => `## ${page.title || page.url}\n${page.content_excerpt || ""}`)
+            .join("\n\n---\n\n");
+          console.log(`[RPA Analysis] Loaded ground truth from ${crawledPages.length} crawled pages`);
+
+          const groundTruthSummary = brand.ground_truth_summary as {
+            structured_data?: {
+              pricing?: { plan_name: string; price: string; features?: string[]; is_free?: boolean }[];
+              features?: string[];
+              products?: string[];
+              services?: string[];
+              company_description?: string;
+              tagline?: string;
+              locations?: string[];
+            };
+          } | null;
+
+          if (groundTruthSummary?.structured_data) {
+            structuredGroundTruth = {
+              ...groundTruthSummary.structured_data,
+              raw_content: groundTruthContent,
+              crawled_pages: crawledPages.map(p => ({
+                url: p.url,
+                title: p.title || p.url,
+                excerpt: p.content_excerpt || "",
+              })),
+            };
+            console.log(`[RPA Analysis] Loaded structured ground truth: ${structuredGroundTruth.pricing?.length || 0} pricing, ${structuredGroundTruth.features?.length || 0} features`);
+          }
+        }
+      }
+
+      let hallucinationResult: HallucinationResult | undefined;
+      if (enableHallucinationWatchdog && structuredGroundTruth) {
+        console.log(`[RPA Analysis] Hallucination Watchdog ENABLED - running detection...`);
+
+        hallucinationResult = await detectHallucinations(
+          responseHtml,
+          structuredGroundTruth,
+          brandName,
+          brandDomain
+        );
+
+        const negativeHallucination = detectNegativeHallucination(
+          responseHtml,
+          structuredGroundTruth
+        );
+
+        if (negativeHallucination) {
+          hallucinationResult.hallucinations.push(negativeHallucination);
+          hallucinationResult.has_hallucinations = true;
+        }
+
+        (selectionSignals as unknown as Record<string, unknown>).hallucination_watchdog = {
+          enabled: true,
+          result: hallucinationResult,
+        };
+
+        if (hallucinationResult.has_hallucinations) {
+          const brandSettings = (brand.settings || {}) as Record<string, unknown>;
+
+          const enhancedActionItems = hallucinationResult.hallucinations.map((h: DetectedHallucination) => {
+            const schemaFix = generateSchemaFix(h, {
+              name: brandName,
+              domain: brandDomain,
+              description: brandSettings.product_description as string,
+              industry: brandSettings.industry as string,
+              services: structuredGroundTruth?.services,
+              products: structuredGroundTruth?.products,
+              pricing: structuredGroundTruth?.pricing,
+            }, structuredGroundTruth);
+
+            if (schemaFix) {
+              h.recommendation.schema_fix = schemaFix;
+            }
+
+            return {
+              priority: (h.severity === "critical" ? "high" : h.severity === "major" ? "medium" : "foundational") as ActionItem["priority"],
+              category: "content" as const,
+              title: h.recommendation.title,
+              description: h.recommendation.description,
+              steps: [h.recommendation.specific_fix],
+            };
+          });
+
+          (selectionSignals as unknown as Record<string, unknown>).action_items = [
+            ...enhancedActionItems,
+            ...((selectionSignals as unknown as Record<string, unknown>).action_items as ActionItem[] || []),
+          ];
+        }
+      } else if (!enableHallucinationWatchdog) {
+        (selectionSignals as unknown as Record<string, unknown>).hallucination_watchdog = {
+          enabled: false,
+          result: null,
+        };
+      } else {
+        console.log(`[RPA Analysis] Hallucination Watchdog ENABLED but no ground truth data available`);
+        (selectionSignals as unknown as Record<string, unknown>).hallucination_watchdog = {
+          enabled: true,
+          result: null,
+          no_ground_truth: true,
+        };
+      }
+
       // Get crawl analysis for actionable recommendations
       const groundTruthSummary = brand.ground_truth_summary as {
         crawl_analysis?: CrawlAnalysis;

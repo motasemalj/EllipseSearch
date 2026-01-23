@@ -285,6 +285,12 @@ export async function POST(request: NextRequest) {
             language,
             region,
             status: "awaiting_rpa",
+            selection_signals: {
+              hallucination_watchdog: {
+                enabled: enable_hallucination_watchdog || false,
+                result: null,
+              },
+            },
           });
         }
       }

@@ -481,6 +481,22 @@ async function handlePromptCompleted(
   const brandCitations = citationAuthorities.filter(c => c.is_brand_domain).length;
   console.log(`[RPA Ingest] Citation Authority: ${citationAuthorities.length} sources, ${brandCitations} brand citations`);
   
+  // Preserve existing selection signals (if this is an update)
+  let existingSignals: Record<string, unknown> | null = null;
+  if (payload.simulation_id) {
+    const { data: existingSim } = await supabase
+      .from("simulations")
+      .select("selection_signals")
+      .eq("id", payload.simulation_id)
+      .single();
+
+    existingSignals = (existingSim?.selection_signals as Record<string, unknown>) || null;
+  }
+
+  const existingWatchdog = (existingSignals as { hallucination_watchdog?: { enabled?: boolean; no_ground_truth?: boolean } } | null)
+    ?.hallucination_watchdog;
+  const watchdogEnabled = existingWatchdog?.enabled === true;
+
   // Prepare simulation record with basic data (fast)
   // Full GPT analysis will be added by background job
   // ENHANCED: Use the enhanced/extracted response content
@@ -505,6 +521,9 @@ async function handlePromptCompleted(
       citation_authorities: citationAuthorities,
       brand_mentions: visibilityCheck.mentions,
       brand_citations: brandCitations,
+      hallucination_watchdog: existingWatchdog
+        ? { ...existingWatchdog, enabled: watchdogEnabled, result: null }
+        : { enabled: false, result: null },
       gap_analysis: {
         structure_score: 3,
         data_density_score: 3,
