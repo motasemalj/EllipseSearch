@@ -490,7 +490,7 @@ export function BrandPromptsList({ brandId, prompts }: BrandPromptsListProps) {
           engines: selectedEngines,
           language,
           region,
-          enable_hallucination_watchdog: canUseWatchdog && enableWatchdog && hasCrawledData,
+          enable_hallucination_watchdog: canUseWatchdog && enableWatchdog,
           schedule: schedule !== "none" ? schedule : undefined,
         }),
       });

@@ -106,7 +106,29 @@ const typeConfig = {
     label: "Missing Information",
     description: "AI couldn't find information that exists on your website",
   },
+  // Backend hallucination detector types (RPA + API)
+  positive: {
+    icon: AlertTriangle,
+    label: "Inaccurate Claim",
+    description: "AI stated incorrect or fabricated information",
+  },
+  misattribution: {
+    icon: AlertTriangle,
+    label: "Misattribution",
+    description: "AI attributed wrong products/services to your brand",
+  },
+  outdated: {
+    icon: AlertTriangle,
+    label: "Outdated Info",
+    description: "AI used old or outdated information",
+  },
 };
+
+function normalizeHallucinationType(type: string): keyof typeof typeConfig {
+  if (type in typeConfig) return type as keyof typeof typeConfig;
+  // Fallbacks for unexpected values
+  return "factual";
+}
 
 // Example hallucinations to show in locked state
 const exampleHallucinations = [
@@ -354,7 +376,7 @@ export function HallucinationWatchdogSection({ data, brandId, userTier }: Halluc
           <div className="space-y-3">
             {result.hallucinations.map((item, index) => {
               const severity = severityConfig[item.severity];
-              const type = typeConfig[item.type];
+              const type = typeConfig[normalizeHallucinationType(item.type)];
               const SeverityIcon = severity.icon;
               const TypeIcon = type.icon;
 

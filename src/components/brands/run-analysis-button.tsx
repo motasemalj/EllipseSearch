@@ -284,7 +284,7 @@ export function RunAnalysisButton({ brandId, keywordSetId, keywordsCount }: RunA
           engines: selectedEngines,
           language,
           region,
-          enable_hallucination_watchdog: canUseWatchdog && enableWatchdog && hasCrawledData,
+          enable_hallucination_watchdog: canUseWatchdog && enableWatchdog,
         }),
       });
 
