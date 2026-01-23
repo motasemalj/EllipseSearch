@@ -44,6 +44,7 @@ interface HallucinationResult {
 interface HallucinationWatchdogData {
   enabled: boolean;
   result: HallucinationResult | null;
+  no_ground_truth?: boolean;
 }
 
 interface HallucinationWatchdogSectionProps {
@@ -132,16 +133,20 @@ export function HallucinationWatchdogSection({ data, brandId, userTier }: Halluc
   
   // Determine what state to show:
   // 1. Not Pro and no data/result -> Show upgrade prompt
-  // 2. Pro but detection wasn't enabled -> Show "enable in next analysis"
-  // 3. Pro and detection enabled but no result (no ground truth data) -> Show "need to crawl website"
+  // 2. Pro but detection wasn't enabled (data.enabled = false) -> Show "enable in next analysis"
+  // 3. Pro and detection enabled but no ground truth data -> Show "need to crawl website"
   // 4. Pro and detection enabled with result -> Show results
   
   const showUpgradePrompt = !isPro && (!data?.result);
-  const wasEnabledButNoResult = isPro && data?.enabled && !data?.result;
-  const wasNotEnabled = isPro && (!data || !data.enabled);
+  // Explicitly enabled but no result AND no_ground_truth flag set
+  const wasEnabledButNoGroundTruth = isPro && data?.enabled === true && !data?.result && data?.no_ground_truth === true;
+  // Enabled but no result for other reasons (e.g., detection failed)
+  const wasEnabledButNoResult = isPro && data?.enabled === true && !data?.result && !data?.no_ground_truth;
+  // Not enabled at all (data is undefined, or data.enabled is explicitly false)
+  const wasNotEnabled = isPro && (!data || data.enabled === false);
   
   // Show locked/upgrade state
-  if (showUpgradePrompt || wasNotEnabled || wasEnabledButNoResult) {
+  if (showUpgradePrompt || wasNotEnabled || wasEnabledButNoGroundTruth || wasEnabledButNoResult) {
     return (
       <Card className="border-2 border-dashed border-amber-500/30 bg-gradient-to-br from-amber-950/10 via-background to-orange-950/10 overflow-hidden relative" id="watchdog">
         {/* Decorative gradient */}
@@ -163,9 +168,11 @@ export function HallucinationWatchdogSection({ data, brandId, userTier }: Halluc
               <CardDescription>
                 {showUpgradePrompt 
                   ? "Upgrade to Pro to unlock this feature"
-                  : wasEnabledButNoResult
+                  : wasEnabledButNoGroundTruth
                     ? "Website crawl data needed for detection"
-                    : "Enable in Run Analysis to detect AI lies"
+                    : wasEnabledButNoResult
+                      ? "Detection ran but encountered an issue"
+                      : "Enable in Run Analysis to detect AI lies"
                 }
               </CardDescription>
             </div>
@@ -226,17 +233,21 @@ export function HallucinationWatchdogSection({ data, brandId, userTier }: Halluc
                 <h3 className="text-lg font-semibold mb-2">
                   {showUpgradePrompt 
                     ? "Unlock Hallucination Detection" 
-                    : wasEnabledButNoResult
+                    : wasEnabledButNoGroundTruth
                       ? "Website Crawl Required"
-                      : "Enable in Your Next Analysis"
+                      : wasEnabledButNoResult
+                        ? "Detection Encountered an Issue"
+                        : "Enable in Your Next Analysis"
                   }
                 </h3>
                 <p className="text-sm text-muted-foreground mb-4 max-w-sm mx-auto">
                   {showUpgradePrompt 
                     ? "Upgrade to Pro to detect when AI lies about your brand's pricing, features, and availability."
-                    : wasEnabledButNoResult
+                    : wasEnabledButNoGroundTruth
                       ? "Hallucination detection needs your website crawl data as 'ground truth'. Crawl your website first, then run another analysis."
-                      : "Toggle 'AI Hallucination Detection' when running your next analysis to see results here."
+                      : wasEnabledButNoResult
+                        ? "The detection was enabled but couldn't complete. Please try running the analysis again."
+                        : "Toggle 'AI Hallucination Detection' when running your next analysis to see results here."
                   }
                 </p>
                 {showUpgradePrompt ? (
@@ -246,12 +257,16 @@ export function HallucinationWatchdogSection({ data, brandId, userTier }: Halluc
                       Upgrade to Pro
                     </Button>
                   </Link>
-                ) : wasEnabledButNoResult ? (
+                ) : wasEnabledButNoGroundTruth ? (
                   <Link href={brandId ? `/brands/${brandId}/edit` : "#"}>
                     <Button className="bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-white">
                       Crawl Website
                     </Button>
                   </Link>
+                ) : wasEnabledButNoResult ? (
+                  <p className="text-xs text-amber-600 dark:text-amber-400">
+                    Please try running the analysis again
+                  </p>
                 ) : (
                   <p className="text-xs text-amber-600 dark:text-amber-400">
                     Run a new analysis with Hallucination Detection enabled

@@ -560,6 +560,15 @@ export const checkPromptVisibility = task({
           enabled: false,
           result: null,
         };
+      } else {
+        // enable_hallucination_watchdog is true but no ground truth data available
+        // Mark as enabled but with no result (so UI knows it was enabled but couldn't run)
+        console.log(`⚠️ Hallucination Watchdog ENABLED but no ground truth data available`);
+        (selectionSignals as unknown as Record<string, unknown>).hallucination_watchdog = {
+          enabled: true,
+          result: null,
+          no_ground_truth: true,
+        };
       }
 
       // 10. ENHANCE WITH TIERED, ENGINE-SPECIFIC RECOMMENDATIONS
