@@ -3,8 +3,9 @@
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
-import { Loader2, Eye, EyeOff, Clock, BarChart3, AlertCircle, Info, Timer, StopCircle } from "lucide-react";
+import { Loader2, Eye, EyeOff, AlertCircle, Timer, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -15,13 +16,9 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
+import { ChatGPTIcon, PerplexityIcon, GeminiIcon, GrokIcon } from "@/components/ui/engine-badge";
 import { toast } from "sonner";
+import { SupportedEngine } from "@/types";
 
 interface RunningBatch {
   id: string;
@@ -29,13 +26,23 @@ interface RunningBatch {
   completed_simulations: number;
   created_at: string;
   prompt_text?: string;
+  prompt_id?: string | null;
+  engines: SupportedEngine[];
+  status?: string;
 }
+
 
 interface AnalysisProgressProps {
   brandId: string;
 }
 
-// Estimate time based on simulations remaining (roughly 15-30 seconds per simulation)
+const engineIcons: Record<SupportedEngine, React.ReactNode> = {
+  chatgpt: <ChatGPTIcon className="w-4 h-4" />,
+  perplexity: <PerplexityIcon className="w-4 h-4" />,
+  gemini: <GeminiIcon className="w-4 h-4" />,
+  grok: <GrokIcon className="w-4 h-4" />,
+};
+
 function estimateTimeRemaining(remaining: number): string {
   if (remaining === 0) return "Finishing up...";
   const minSeconds = remaining * 15;
@@ -47,8 +54,8 @@ function estimateTimeRemaining(remaining: number): string {
   const minMinutes = Math.ceil(minSeconds / 60);
   const maxMinutes = Math.ceil(maxSeconds / 60);
   
-  if (maxMinutes <= 5) return `~${minMinutes}-${maxMinutes} minutes`;
-  return `~${minMinutes}-${maxMinutes} minutes`;
+  if (maxMinutes <= 5) return `~${minMinutes}-${maxMinutes} min`;
+  return `~${minMinutes}-${maxMinutes} min`;
 }
 
 export function AnalysisProgress({ brandId }: AnalysisProgressProps) {
@@ -61,10 +68,9 @@ export function AnalysisProgress({ brandId }: AnalysisProgressProps) {
   const [batchToCancel, setBatchToCancel] = useState<RunningBatch | null>(null);
 
   useEffect(() => {
-    const fetchProgress = async () => {
-      const supabase = createClient();
+    const supabase = createClient();
 
-      // Get running batches with prompt info
+    const fetchProgress = async () => {
       const { data: fetchedBatches } = await supabase
         .from("analysis_batches")
         .select(`
@@ -73,86 +79,119 @@ export function AnalysisProgress({ brandId }: AnalysisProgressProps) {
           completed_simulations, 
           created_at,
           prompt_id,
-          prompt_set_id
+          prompt_set_id,
+          engines,
+          status
         `)
         .eq("brand_id", brandId)
-        .in("status", ["queued", "processing"])
+        .in("status", ["queued", "processing", "awaiting_rpa"])
         .order("created_at", { ascending: false });
 
       if (!fetchedBatches || fetchedBatches.length === 0) {
         setBatches([]);
+        setBatchVisibility({});
         setIsLoading(false);
         return;
       }
 
-      // Map batches with prompt text - fetch from prompts table or simulations
-      const batchesWithPrompt = await Promise.all(
-        fetchedBatches.map(async (b) => {
-          let promptText = "Multiple prompts";
-          
-          // If batch has a direct prompt_id, fetch that prompt's text
-          if (b.prompt_id) {
-            const { data: prompt } = await supabase
+      const promptIds = Array.from(
+        new Set(fetchedBatches.map((b) => b.prompt_id).filter(Boolean))
+      ) as string[];
+      const promptSetIds = Array.from(
+        new Set(fetchedBatches.map((b) => b.prompt_set_id).filter(Boolean))
+      ) as string[];
+      const batchIds = fetchedBatches.map((b) => b.id);
+
+      const [promptResult, promptSetResult, simulationsResult] = await Promise.all([
+        promptIds.length > 0
+          ? supabase.from("prompts").select("id, text").in("id", promptIds)
+          : Promise.resolve({ data: [] }),
+        promptSetIds.length > 0
+          ? supabase
               .from("prompts")
-              .select("text")
-              .eq("id", b.prompt_id)
-              .single();
-            promptText = prompt?.text || "Analysis in progress";
-          } else if (b.prompt_set_id) {
-            // If batch has a prompt_set_id, get the first prompt from that set
-            const { data: setPrompts } = await supabase
-              .from("prompts")
-              .select("text")
-              .eq("prompt_set_id", b.prompt_set_id)
-              .limit(1);
-            if (setPrompts && setPrompts.length > 0) {
-              promptText = setPrompts[0].text;
-            }
-          } else {
-            // Fallback: try to get prompt text from simulations
-            const { data: sims } = await supabase
+              .select("prompt_set_id, text, created_at")
+              .in("prompt_set_id", promptSetIds)
+              .order("created_at", { ascending: true })
+          : Promise.resolve({ data: [] }),
+        batchIds.length > 0
+          ? supabase
               .from("simulations")
-              .select("prompt_text")
-              .eq("analysis_batch_id", b.id)
-              .limit(1);
-            if (sims && sims.length > 0) {
-              promptText = sims[0].prompt_text || "Analysis in progress";
-            }
-          }
-          
-          return {
-            ...b,
-            prompt_text: promptText,
-          };
-        })
+              .select("analysis_batch_id, is_visible, prompt_text")
+              .in("analysis_batch_id", batchIds)
+          : Promise.resolve({ data: [] }),
+      ]);
+
+      const promptMap = new Map(
+        (promptResult.data || []).map((p) => [p.id, p.text])
       );
-
-      setBatches(batchesWithPrompt);
-
-      // Get simulations for each batch's visibility counts
-      const visibilityMap: Record<string, { visible: number; notVisible: number }> = {};
-      
-      for (const batch of fetchedBatches) {
-        const { data: sims } = await supabase
-          .from("simulations")
-          .select("is_visible")
-          .eq("analysis_batch_id", batch.id);
-
-        if (sims) {
-          visibilityMap[batch.id] = {
-            visible: sims.filter(s => s.is_visible === true).length,
-            notVisible: sims.filter(s => s.is_visible === false).length,
-          };
+      const promptSetMap = new Map<string, string>();
+      for (const prompt of promptSetResult.data || []) {
+        if (!promptSetMap.has(prompt.prompt_set_id)) {
+          promptSetMap.set(prompt.prompt_set_id, prompt.text);
         }
       }
-      
+
+      const visibilityMap: Record<string, { visible: number; notVisible: number }> = {};
+      const fallbackPromptMap = new Map<string, string>();
+      for (const sim of simulationsResult.data || []) {
+        if (!visibilityMap[sim.analysis_batch_id]) {
+          visibilityMap[sim.analysis_batch_id] = { visible: 0, notVisible: 0 };
+        }
+        if (sim.is_visible === true) {
+          visibilityMap[sim.analysis_batch_id].visible += 1;
+        } else if (sim.is_visible === false) {
+          visibilityMap[sim.analysis_batch_id].notVisible += 1;
+        }
+        if (!fallbackPromptMap.has(sim.analysis_batch_id) && sim.prompt_text) {
+          fallbackPromptMap.set(sim.analysis_batch_id, sim.prompt_text);
+        }
+      }
+
+      const batchesWithPrompt = fetchedBatches.map((b) => {
+        const promptText =
+          (b.prompt_id ? promptMap.get(b.prompt_id) : undefined) ||
+          (b.prompt_set_id ? promptSetMap.get(b.prompt_set_id) : undefined) ||
+          fallbackPromptMap.get(b.id) ||
+          "Analysis in progress";
+
+        return {
+          ...b,
+          prompt_text: promptText,
+          prompt_id: b.prompt_id,
+          engines: (b.engines as SupportedEngine[]) || [],
+          status: b.status,
+        };
+      });
+
+      setBatches(batchesWithPrompt);
       setBatchVisibility(visibilityMap);
       setIsLoading(false);
     };
 
     fetchProgress();
-    const interval = setInterval(fetchProgress, 2000);
-    return () => clearInterval(interval);
+
+    const batchesChannel = supabase
+      .channel(`analysis-batches-${brandId}`)
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "analysis_batches", filter: `brand_id=eq.${brandId}` },
+        () => fetchProgress()
+      )
+      .subscribe();
+
+    const simulationsChannel = supabase
+      .channel(`analysis-batches-simulations-${brandId}`)
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "simulations", filter: `brand_id=eq.${brandId}` },
+        () => fetchProgress()
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(batchesChannel);
+      supabase.removeChannel(simulationsChannel);
+    };
   }, [brandId]);
 
   const handleCancelClick = (batch: RunningBatch) => {
@@ -185,7 +224,6 @@ export function AnalysisProgress({ brandId }: AnalysisProgressProps) {
           : "The analysis has been stopped.",
       });
 
-      // Remove from local state immediately
       setBatches(prev => prev.filter(b => b.id !== batchToCancel.id));
       router.refresh();
     } catch (error) {
@@ -202,117 +240,90 @@ export function AnalysisProgress({ brandId }: AnalysisProgressProps) {
   if (isLoading || batches.length === 0) return null;
 
   return (
-    <TooltipProvider>
-      <div className="rounded-2xl border border-primary/30 bg-gradient-to-br from-primary/10 via-primary/5 to-transparent p-5">
-        {/* Header */}
-        <div className="flex items-center justify-between mb-4">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-primary/20 flex items-center justify-center">
-              <BarChart3 className="w-5 h-5 text-primary" />
+    <>
+      <div className="rounded-xl border border-border bg-card shadow-sm overflow-hidden">
+        {/* Compact Header */}
+        <div className="flex items-center justify-between px-4 py-3 bg-muted/30 border-b border-border">
+          <div className="flex items-center gap-2">
+            <div className="relative flex items-center justify-center">
+              <div className="w-2 h-2 rounded-full bg-primary animate-pulse" />
+              <div className="absolute w-4 h-4 rounded-full bg-primary/20 animate-ping" />
             </div>
-            <div>
-              <h3 className="font-semibold">Running Analyses</h3>
-              <p className="text-sm text-muted-foreground flex items-center gap-2">
-                <Loader2 className="w-3 h-3 animate-spin" />
-                {batches.length} {batches.length === 1 ? 'analysis' : 'analyses'} in progress
-              </p>
-            </div>
+            <span className="font-medium text-sm">
+              {batches.length === 1 ? 'Analysis Running' : `${batches.length} Analyses Running`}
+            </span>
           </div>
-          
-          {/* Disclaimer tooltip */}
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <div className="flex items-center gap-1.5 text-xs text-muted-foreground bg-muted/50 px-2.5 py-1.5 rounded-lg cursor-help">
-                <Info className="w-3.5 h-3.5" />
-                <span>May take a few minutes</span>
-              </div>
-            </TooltipTrigger>
-            <TooltipContent side="left" className="max-w-xs">
-              <p>Each AI engine simulation takes 15-30 seconds. Total time depends on the number of engines and prompts being analyzed.</p>
-            </TooltipContent>
-          </Tooltip>
+          <Loader2 className="w-4 h-4 animate-spin text-muted-foreground" />
         </div>
 
-        {/* Individual Analysis Cards - Each batch gets its own row */}
-        <div className="space-y-3">
-        {batches.map((batch) => {
-          const progress = batch.total_simulations > 0 
-            ? Math.round((batch.completed_simulations / batch.total_simulations) * 100) 
-            : 0;
-          const remaining = batch.total_simulations - batch.completed_simulations;
-          const visibility = batchVisibility[batch.id] || { visible: 0, notVisible: 0 };
-          const elapsedSeconds = Math.round((Date.now() - new Date(batch.created_at).getTime()) / 1000);
+        {/* Batches - Compact Single-Row List */}
+        <div className="divide-y divide-border">
+          {batches.map((batch) => {
+            const progress = batch.total_simulations > 0 
+              ? Math.round((batch.completed_simulations / batch.total_simulations) * 100) 
+              : 0;
+            const visibility = batchVisibility[batch.id] || { visible: 0, notVisible: 0 };
+            const elapsedSeconds = Math.round((Date.now() - new Date(batch.created_at).getTime()) / 1000);
+            const elapsedFormatted = elapsedSeconds < 60 
+              ? `${elapsedSeconds}s` 
+              : `${Math.floor(elapsedSeconds / 60)}m`;
 
-          return (
-            <div 
-              key={batch.id}
-              className="rounded-xl border border-primary/20 bg-gradient-to-br from-primary/5 via-transparent to-transparent p-4"
-            >
-              {/* Batch Header */}
-              <div className="flex items-start justify-between gap-3 mb-3">
+            return (
+              <div key={batch.id} className="flex items-center gap-3 px-4 py-3">
+                {/* Progress indicator - no percentage, just animated loader */}
+                <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
+                  <Loader2 className="w-4 h-4 animate-spin text-primary" />
+                </div>
+                
+                {/* Content */}
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-medium truncate" title={batch.prompt_text}>
-                    &ldquo;{batch.prompt_text?.substring(0, 50)}{(batch.prompt_text?.length || 0) > 50 ? "..." : ""}&rdquo;
+                    {batch.prompt_text}
                   </p>
-                  <div className="flex items-center gap-3 mt-1 text-xs text-muted-foreground">
-                    <span className="flex items-center gap-1">
-                      <Timer className="w-3 h-3" />
-                      {elapsedSeconds < 60 ? `${elapsedSeconds}s` : `${Math.floor(elapsedSeconds / 60)}m ${elapsedSeconds % 60}s`} elapsed
+                  <div className="flex items-center gap-3 mt-0.5 text-xs text-muted-foreground">
+                    {/* Engines - inline */}
+                    <div className="flex items-center gap-0.5">
+                      {batch.engines.map(engine => (
+                        <span key={engine} className="w-4 h-4">{engineIcons[engine]}</span>
+                      ))}
+                    </div>
+                    <span>{batch.completed_simulations}/{batch.total_simulations}</span>
+                    <span className="flex items-center gap-0.5">
+                      <Timer className="w-3 h-3" />{elapsedFormatted}
                     </span>
-                    <span className="flex items-center gap-1 text-amber-600 dark:text-amber-400">
-                      <Clock className="w-3 h-3" />
-                      {estimateTimeRemaining(remaining)}
-                    </span>
+                    {visibility.visible > 0 && (
+                      <span className="text-emerald-600 dark:text-emerald-400 flex items-center gap-0.5">
+                        <Eye className="w-3 h-3" />{visibility.visible}
+                      </span>
+                    )}
+                    {visibility.notVisible > 0 && (
+                      <span className="text-red-500 flex items-center gap-0.5">
+                        <EyeOff className="w-3 h-3" />{visibility.notVisible}
+                      </span>
+                    )}
                   </div>
                 </div>
                 
-                {/* Enhanced Cancel Button */}
+                {/* Cancel Button - Larger */}
                 <Button
                   variant="outline"
                   size="sm"
-                  className="gap-1.5 bg-red-50 dark:bg-red-950/30 text-red-600 dark:text-red-400 border-red-200 dark:border-red-800 hover:bg-red-100 dark:hover:bg-red-950/50 hover:text-red-700 hover:border-red-300 shadow-sm transition-all"
+                  className="h-8 px-3 text-red-600 border-red-200 hover:bg-red-50 hover:border-red-300 dark:border-red-800 dark:hover:bg-red-950 shrink-0"
                   onClick={() => handleCancelClick(batch)}
                   disabled={cancellingBatchId === batch.id}
                 >
                   {cancellingBatchId === batch.id ? (
-                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    <Loader2 className="w-4 h-4 animate-spin" />
                   ) : (
-                    <StopCircle className="w-3.5 h-3.5" />
+                    <>
+                      <X className="w-4 h-4 mr-1" />
+                      Cancel
+                    </>
                   )}
-                  <span className="font-medium">Cancel</span>
                 </Button>
               </div>
-
-              {/* Progress Bar */}
-              <div className="space-y-1.5">
-                <div className="flex items-center justify-between text-xs">
-                  <span className="text-muted-foreground">{batch.completed_simulations} of {batch.total_simulations} simulations</span>
-                  <span className="font-semibold text-primary">{progress}%</span>
-                </div>
-                <div className="h-1.5 rounded-full bg-muted overflow-hidden">
-                  <div 
-                    className="h-full rounded-full bg-primary transition-all duration-500"
-                    style={{ width: `${progress}%` }}
-                  />
-                </div>
-              </div>
-
-              {/* Results Preview */}
-              {(visibility.visible > 0 || visibility.notVisible > 0) && (
-                <div className="flex items-center gap-3 mt-3 text-xs">
-                  <span className="flex items-center gap-1 text-emerald-600 dark:text-emerald-400">
-                    <Eye className="w-3 h-3" />
-                    {visibility.visible} visible
-                  </span>
-                  <span className="flex items-center gap-1 text-red-600 dark:text-red-400">
-                    <EyeOff className="w-3 h-3" />
-                    {visibility.notVisible} not visible
-                  </span>
-                </div>
-              )}
-            </div>
-          );
-        })}
+            );
+          })}
         </div>
       </div>
 
@@ -350,6 +361,7 @@ export function AnalysisProgress({ brandId }: AnalysisProgressProps) {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-    </TooltipProvider>
+
+    </>
   );
 }

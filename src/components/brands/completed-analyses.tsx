@@ -10,13 +10,13 @@ import {
   EyeOff, 
   Clock, 
   ChevronRight,
-  Sparkles,
   History,
   Search,
   Loader2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Progress } from "@/components/ui/progress";
 import { ChatGPTIcon, PerplexityIcon, GeminiIcon, GrokIcon } from "@/components/ui/engine-badge";
 import { SupportedEngine } from "@/types";
 
@@ -31,7 +31,6 @@ interface CompletedBatch {
   visible_count: number;
   not_visible_count: number;
   engines: SupportedEngine[];
-  // For navigation when prompt_id is not set on batch
   first_simulation_prompt_id?: string;
 }
 
@@ -41,10 +40,10 @@ interface CompletedAnalysesProps {
 }
 
 const engineIcons: Record<SupportedEngine, React.ReactNode> = {
-  chatgpt: <ChatGPTIcon className="w-3.5 h-3.5" />,
-  perplexity: <PerplexityIcon className="w-3.5 h-3.5" />,
-  gemini: <GeminiIcon className="w-3.5 h-3.5" />,
-  grok: <GrokIcon className="w-3.5 h-3.5" />,
+  chatgpt: <ChatGPTIcon className="w-4 h-4" />,
+  perplexity: <PerplexityIcon className="w-4 h-4" />,
+  gemini: <GeminiIcon className="w-4 h-4" />,
+  grok: <GrokIcon className="w-4 h-4" />,
 };
 
 export function CompletedAnalyses({ brandId, onNewCompletion }: CompletedAnalysesProps) {
@@ -54,10 +53,9 @@ export function CompletedAnalyses({ brandId, onNewCompletion }: CompletedAnalyse
   const [recentlyCompleted, setRecentlyCompleted] = useState<Set<string>>(new Set());
 
   useEffect(() => {
-    const fetchCompleted = async () => {
-      const supabase = createClient();
+    const supabase = createClient();
 
-      // Get completed batches from the last 24 hours
+    const fetchCompleted = async () => {
       const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
       
       const { data: fetchedBatches } = await supabase
@@ -83,7 +81,6 @@ export function CompletedAnalyses({ brandId, onNewCompletion }: CompletedAnalyse
         return;
       }
 
-      // Get simulations for each batch to calculate visibility
       const batchesWithStats = await Promise.all(
         fetchedBatches.map(async (batch) => {
           const { data: sims } = await supabase
@@ -95,14 +92,11 @@ export function CompletedAnalyses({ brandId, onNewCompletion }: CompletedAnalyse
           const notVisibleCount = sims?.filter(s => s.is_visible === false).length || 0;
           const engines = Array.from(new Set(sims?.map(s => s.engine) || [])) as SupportedEngine[];
           
-          // Get prompt_id from simulations if not set on batch
           const firstSimulationPromptId = sims?.[0]?.prompt_id || null;
 
-          // Get prompt text - try prompt_id first, then prompt_set_id, then simulations
           let promptText = "Multiple prompts";
           
           if (batch.prompt_id) {
-            // Direct prompt_id - fetch the prompt text
             const { data: prompt } = await supabase
               .from("prompts")
               .select("text")
@@ -110,7 +104,6 @@ export function CompletedAnalyses({ brandId, onNewCompletion }: CompletedAnalyse
               .single();
             promptText = prompt?.text || "Analysis completed";
           } else if (batch.prompt_set_id) {
-            // Prompt set - get first prompt text
             const { data: setPrompts } = await supabase
               .from("prompts")
               .select("text")
@@ -120,7 +113,6 @@ export function CompletedAnalyses({ brandId, onNewCompletion }: CompletedAnalyse
               promptText = setPrompts[0].text;
             }
           } else if (sims && sims.length > 0) {
-            // Fallback: get from simulations
             promptText = sims[0].prompt_text || "Analysis completed";
           }
           
@@ -135,7 +127,6 @@ export function CompletedAnalyses({ brandId, onNewCompletion }: CompletedAnalyse
         })
       );
 
-      // Track recently completed (completed in last 5 minutes)
       const fiveMinutesAgo = Date.now() - 5 * 60 * 1000;
       const newlyCompleted = new Set<string>();
       
@@ -154,15 +145,34 @@ export function CompletedAnalyses({ brandId, onNewCompletion }: CompletedAnalyse
     };
 
     fetchCompleted();
-    // Refresh every 30 seconds to catch new completions
-    const interval = setInterval(fetchCompleted, 30000);
-    return () => clearInterval(interval);
+
+    const batchesChannel = supabase
+      .channel(`completed-batches-${brandId}`)
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "analysis_batches", filter: `brand_id=eq.${brandId}` },
+        () => fetchCompleted()
+      )
+      .subscribe();
+
+    const simulationsChannel = supabase
+      .channel(`completed-simulations-${brandId}`)
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "simulations", filter: `brand_id=eq.${brandId}` },
+        () => fetchCompleted()
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(batchesChannel);
+      supabase.removeChannel(simulationsChannel);
+    };
   }, [brandId, onNewCompletion]);
 
   const router = useRouter();
-  const displayedBatches = showAll ? batches : batches.slice(0, 3);
+  const displayedBatches = showAll ? batches : batches.slice(0, 5);
 
-  // Get the prompt ID to navigate to (prefer batch.prompt_id, fallback to simulation's prompt_id)
   const getPromptIdForNavigation = (batch: CompletedBatch) => {
     return batch.prompt_id || batch.first_simulation_prompt_id;
   };
@@ -175,128 +185,88 @@ export function CompletedAnalyses({ brandId, onNewCompletion }: CompletedAnalyse
   };
 
   return (
-    <div className="rounded-2xl border border-border bg-card">
-      {/* Header */}
-      <div className="flex items-center justify-between p-5 border-b border-border bg-gradient-to-r from-emerald-500/5 to-transparent">
-        <div className="flex items-center gap-3">
-          <div className="p-2 rounded-xl bg-emerald-500/10">
-            <History className="w-5 h-5 text-emerald-600 dark:text-emerald-400" />
-          </div>
-          <div>
-            <h2 className="text-lg font-semibold">Recent Analyses</h2>
-            <p className="text-sm text-muted-foreground">
-              {isLoading ? "Loading..." : batches.length === 0 
-                ? "No analyses completed in the last 24 hours" 
-                : `${batches.length} completed in the last 24 hours`
-              }
-            </p>
-          </div>
+    <div className="rounded-xl border border-border bg-card overflow-hidden">
+      {/* Compact Header */}
+      <div className="flex items-center justify-between px-4 py-3 border-b border-border bg-muted/30">
+        <div className="flex items-center gap-2">
+          <History className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+          <span className="font-medium text-sm">
+            Recent Analyses
+            {isLoading && <Loader2 className="w-3 h-3 animate-spin text-muted-foreground inline ml-2" />}
+          </span>
+          {batches.length > 0 && (
+            <span className="text-xs text-muted-foreground">
+              ({batches.length})
+            </span>
+          )}
         </div>
-        {batches.length > 3 && (
-          <Button variant="ghost" size="sm" onClick={() => setShowAll(!showAll)}>
-            {showAll ? "Show Less" : `View All (${batches.length})`}
+        {batches.length > 5 && (
+          <Button variant="ghost" size="sm" onClick={() => setShowAll(!showAll)} className="h-6 px-2 text-xs">
+            {showAll ? "Less" : "All"}
           </Button>
         )}
       </div>
 
       {/* Content */}
       {isLoading ? (
-        <div className="flex items-center justify-center py-12">
-          <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
+        <div className="flex items-center justify-center py-8">
+          <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
         </div>
       ) : batches.length === 0 ? (
-        <div className="flex flex-col items-center justify-center py-12 px-4">
-          <div className="w-12 h-12 rounded-xl bg-muted/50 flex items-center justify-center mb-3">
-            <Search className="w-6 h-6 text-muted-foreground" />
-          </div>
-          <p className="text-sm text-muted-foreground text-center">
-            Run an analysis on a prompt to see results here
-          </p>
+        <div className="py-8 px-4 text-center">
+          <Search className="w-6 h-6 text-muted-foreground mx-auto mb-2" />
+          <p className="text-sm text-muted-foreground">No analyses in the last 24 hours</p>
         </div>
       ) : (
-        /* Completed Analyses List */
         <div className="divide-y divide-border">
           {displayedBatches.map((batch) => {
             const isRecent = recentlyCompleted.has(batch.id);
-            const visibility = batch.total_simulations > 0
-              ? Math.round((batch.visible_count / batch.total_simulations) * 100)
-              : 0;
             const hasNavigation = !!getPromptIdForNavigation(batch);
             
             return (
               <div 
                 key={batch.id}
                 onClick={() => handleRowClick(batch)}
-                className={`p-4 transition-colors ${isRecent ? 'bg-emerald-500/5' : ''} ${
-                  hasNavigation 
-                    ? 'cursor-pointer hover:bg-muted/30' 
-                    : ''
-                }`}
+                className={`group flex items-center gap-3 px-4 py-3 transition-colors ${
+                  isRecent ? 'bg-emerald-500/5' : 'hover:bg-muted/30'
+                } ${hasNavigation ? 'cursor-pointer' : ''}`}
               >
-                <div className="flex items-start justify-between gap-3">
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2">
-                      {isRecent && (
-                        <Badge variant="outline" className="bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-200 dark:border-emerald-800 gap-1">
-                          <Sparkles className="w-3 h-3" />
-                          Just completed
-                        </Badge>
-                      )}
-                      <p className="text-sm font-medium truncate" title={batch.prompt_text}>
-                        &ldquo;{batch.prompt_text?.substring(0, 40)}{(batch.prompt_text?.length || 0) > 40 ? "..." : ""}&rdquo;
-                      </p>
-                    </div>
-                    
-                    <div className="flex items-center gap-3 mt-2 text-xs text-muted-foreground">
-                      <span className="flex items-center gap-1">
-                        <Clock className="w-3 h-3" />
-                        {batch.completed_at 
-                          ? formatDistanceToNow(new Date(batch.completed_at), { addSuffix: true })
-                          : 'Recently'
-                        }
-                      </span>
-                      <span className="flex items-center gap-1 text-emerald-600 dark:text-emerald-400">
-                        <Eye className="w-3 h-3" />
-                        {batch.visible_count} visible
-                      </span>
-                      <span className="flex items-center gap-1 text-red-600 dark:text-red-400">
-                        <EyeOff className="w-3 h-3" />
-                        {batch.not_visible_count} not visible
-                      </span>
-                      <span className="flex items-center gap-1">
-                        <CheckCircle2 className="w-3 h-3" />
-                        {batch.total_simulations} total
-                      </span>
-                    </div>
+                {/* Completed icon */}
+                <div className="w-8 h-8 rounded-full bg-emerald-500/10 flex items-center justify-center shrink-0">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                </div>
 
-                    {/* Engine icons */}
-                    <div className="flex items-center gap-1.5 mt-2">
+                {/* Content */}
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2">
+                    {isRecent && (
+                      <span className="shrink-0 w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                    )}
+                    <p className="text-sm font-medium truncate group-hover:text-primary transition-colors" title={batch.prompt_text}>
+                      {batch.prompt_text}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-3 mt-0.5 text-xs text-muted-foreground">
+                    {/* Engines - compact */}
+                    <div className="flex items-center gap-0.5">
                       {batch.engines.map(engine => (
-                        <span key={engine} className="opacity-60">
-                          {engineIcons[engine]}
-                        </span>
+                        <span key={engine} className="w-4 h-4">{engineIcons[engine]}</span>
                       ))}
                     </div>
-                  </div>
-
-                  {/* Visibility indicator and navigation */}
-                  <div className="flex items-center gap-3">
-                    <div className="text-right">
-                      <p className={`text-lg font-bold ${
-                        visibility >= 70 ? 'text-emerald-600 dark:text-emerald-400' :
-                        visibility >= 40 ? 'text-amber-600 dark:text-amber-400' :
-                        'text-red-600 dark:text-red-400'
-                      }`}>
-                        {visibility}%
-                      </p>
-                      <p className="text-xs text-muted-foreground">visibility</p>
-                    </div>
-                    
-                    {hasNavigation && (
-                      <ChevronRight className="w-5 h-5 text-muted-foreground" />
-                    )}
+                    <span>{batch.completed_at ? formatDistanceToNow(new Date(batch.completed_at), { addSuffix: true }) : 'Recently'}</span>
+                    <span className="flex items-center gap-1">
+                      <Eye className="w-3 h-3 text-emerald-500" />{batch.visible_count}
+                    </span>
+                    <span className="flex items-center gap-1">
+                      <EyeOff className="w-3 h-3 text-red-500" />{batch.not_visible_count}
+                    </span>
                   </div>
                 </div>
+
+                {/* Arrow */}
+                {hasNavigation && (
+                  <ChevronRight className="w-4 h-4 text-muted-foreground group-hover:text-primary transition-colors shrink-0" />
+                )}
               </div>
             );
           })}
@@ -305,4 +275,3 @@ export function CompletedAnalyses({ brandId, onNewCompletion }: CompletedAnalyse
     </div>
   );
 }
-

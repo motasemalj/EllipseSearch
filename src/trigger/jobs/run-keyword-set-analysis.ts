@@ -14,7 +14,8 @@
 
 import { task } from "@trigger.dev/sdk/v3";
 import { createClient } from "@supabase/supabase-js";
-import type { SupportedEngine, RunAnalysisInput } from "@/types";
+import type { SupportedEngine, RunAnalysisInput, SimulationMode } from "@/types";
+import { DEFAULT_BROWSER_SIMULATION_MODE } from "@/lib/ai/openai-config";
 import { 
   startCrawl, 
   waitForCrawl, 
@@ -44,7 +45,18 @@ export const runKeywordSetAnalysis = task({
     // Support both prompt_set_id (new) and keyword_set_id (legacy)
     const prompt_set_id = payload.prompt_set_id;
     const prompt_ids = payload.prompt_ids;
-    const { brand_id, engines, language, region = "global", enable_hallucination_watchdog } = payload;
+    const { 
+      brand_id, 
+      engines, 
+      language, 
+      region = "global", 
+      enable_hallucination_watchdog,
+      simulation_mode = DEFAULT_BROWSER_SIMULATION_MODE,
+    } = payload;
+    
+    // Log simulation mode
+    const modeLabel = simulation_mode === 'api' ? 'API' : simulation_mode === 'browser' ? 'Browser (Playwright)' : 'Hybrid';
+    console.log(`Analysis mode: ${modeLabel}`);
     const supabase = getSupabase();
 
     console.log(`Starting analysis for brand ${brand_id}${prompt_set_id ? `, prompt set ${prompt_set_id}` : ''}, ${prompt_ids?.length || 'all'} prompts`);
@@ -377,6 +389,7 @@ export const runKeywordSetAnalysis = task({
             language,
             region,
             enable_hallucination_watchdog,
+            simulation_mode: simulation_mode as SimulationMode,
           });
 
           if (result.ok) {

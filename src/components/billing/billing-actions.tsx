@@ -74,6 +74,22 @@ export function BillingActions({
 
   // If buttonOnly is true and targetTier is provided, render just the upgrade button
   if (buttonOnly && targetTier) {
+    // Agency tier requires contacting sales
+    if (targetTier === "agency") {
+      return (
+        <Button 
+          className="w-full gap-2"
+          variant="outline"
+          asChild
+        >
+          <a href="/support">
+            Contact Sales
+            <ArrowRight className="w-4 h-4" />
+          </a>
+        </Button>
+      );
+    }
+
     const isUpgrade = getTierRank(targetTier) > getTierRank(currentTier);
     const isDowngrade = getTierRank(targetTier) < getTierRank(currentTier);
 

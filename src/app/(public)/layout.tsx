@@ -88,17 +88,17 @@ export default function PublicLayout({
               <h4 className="font-semibold mb-4">Company</h4>
               <ul className="space-y-2 text-sm text-muted-foreground">
                 <li>
-                  <Link href="#" className="hover:text-foreground">
+                  <Link href="/about" className="hover:text-foreground">
                     About
                   </Link>
                 </li>
                 <li>
-                  <Link href="#" className="hover:text-foreground">
+                  <Link href="/blog" className="hover:text-foreground">
                     Blog
                   </Link>
                 </li>
                 <li>
-                  <Link href="#" className="hover:text-foreground">
+                  <Link href="/careers" className="hover:text-foreground">
                     Careers
                   </Link>
                 </li>
@@ -109,12 +109,12 @@ export default function PublicLayout({
               <h4 className="font-semibold mb-4">Legal</h4>
               <ul className="space-y-2 text-sm text-muted-foreground">
                 <li>
-                  <Link href="#" className="hover:text-foreground">
+                  <Link href="/privacy-policy" className="hover:text-foreground">
                     Privacy Policy
                   </Link>
                 </li>
                 <li>
-                  <Link href="#" className="hover:text-foreground">
+                  <Link href="/terms-of-service" className="hover:text-foreground">
                     Terms of Service
                   </Link>
                 </li>

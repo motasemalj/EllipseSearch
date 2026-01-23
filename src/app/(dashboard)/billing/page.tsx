@@ -1,4 +1,5 @@
 import { redirect } from "next/navigation";
+import { headers } from "next/headers";
 import { createClient } from "@/lib/supabase/server";
 import { Button } from "@/components/ui/button";
 import { 
@@ -13,12 +14,13 @@ import {
 } from "lucide-react";
 import { BillingActions } from "@/components/billing/billing-actions";
 import { TIER_LIMITS } from "@/types";
+import { DirhamSymbol } from "@/components/ui/dirham-symbol";
+import { formatCurrencyAmount, getCurrencyFromHeaders, getPricingTiers } from "@/lib/pricing";
 
 const plans = [
   {
     id: "starter",
     name: "Starter",
-    price: "$49",
     period: "/month",
     description: "Perfect for getting started",
     credits: 2000,
@@ -35,7 +37,6 @@ const plans = [
   {
     id: "pro",
     name: "Pro",
-    price: "$149",
     period: "/month",
     description: "For growing agencies",
     credits: 10000,
@@ -53,8 +54,7 @@ const plans = [
   {
     id: "agency",
     name: "Agency",
-    price: "$399",
-    period: "/month",
+    period: "",
     description: "For large agencies",
     credits: 50000,
     features: [
@@ -72,6 +72,18 @@ const plans = [
 ];
 
 export default async function BillingPage() {
+  const currency = getCurrencyFromHeaders(headers());
+  const pricingTiers = getPricingTiers(currency);
+  const plansWithPricing = plans.map((plan) => {
+    const pricing = pricingTiers.find((tier) => tier.id === plan.id);
+    return {
+      ...plan,
+      price: pricing?.price ?? null,
+      currency: pricing?.currency ?? "USD",
+      isCustom: pricing?.isCustom ?? false,
+    };
+  });
+
   const supabase = await createClient();
 
   const { data: { user } } = await supabase.auth.getUser();
@@ -202,7 +214,7 @@ export default async function BillingPage() {
       <div className="space-y-4">
         <h2 className="text-xl font-semibold">Available Plans</h2>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-          {plans.map((plan) => {
+          {plansWithPricing.map((plan) => {
             const isCurrent = plan.id === currentTier;
             return (
               <div 
@@ -230,8 +242,21 @@ export default async function BillingPage() {
                 </div>
 
                 <div className="mb-6">
-                  <span className="text-3xl font-bold">{plan.price}</span>
-                  <span className="text-muted-foreground">{plan.period}</span>
+                  {plan.isCustom ? (
+                    <span className="text-3xl font-bold">Custom</span>
+                  ) : (
+                    <>
+                      <span className="text-3xl font-bold inline-flex items-center gap-1">
+                        {plan.currency === "AED" ? (
+                          <DirhamSymbol size="lg" />
+                        ) : (
+                          <span>{plan.currency === "SAR" ? "SAR" : "$"}</span>
+                        )}
+                        {formatCurrencyAmount(plan.price ?? 0)}
+                      </span>
+                      <span className="text-muted-foreground">{plan.period}</span>
+                    </>
+                  )}
                 </div>
 
                 <ul className="space-y-3 mb-6">
@@ -246,6 +271,13 @@ export default async function BillingPage() {
                 {isCurrent ? (
                   <Button variant="outline" className="w-full" disabled>
                     Current Plan
+                  </Button>
+                ) : plan.isCustom ? (
+                  <Button variant="outline" className="w-full gap-2" asChild>
+                    <a href="/support">
+                      Contact Sales
+                      <ArrowRight className="w-4 h-4" />
+                    </a>
                   </Button>
                 ) : (
                   <BillingActions 

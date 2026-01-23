@@ -107,7 +107,7 @@ export default function DocsPage() {
         <CodeBlock
           language="env"
           code={`# OpenAI model used by Ellipse for ChatGPT simulations + selection signal analysis
-OPENAI_CHAT_MODEL=gpt-5.2
+OPENAI_CHAT_MODEL=gpt-4o-mini
 `}
         />
       </div>

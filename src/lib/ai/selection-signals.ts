@@ -41,6 +41,7 @@ const openai = new OpenAI({
 
 interface AnalyzeSelectionInput {
   answer_html: string;
+  answer_text?: string;
   search_context: SearchContext | null;
   brand_domain: string;
   brand_aliases: string[];
@@ -152,11 +153,11 @@ export async function analyzeSelectionSignals(
     .join("\n\n") || "No search context available";
 
   // Check if brand domain is in search results
-  const brandInResults = search_context?.results.some(
+  const brandInResults = search_context?.results?.some(
     (r) =>
       r.url.includes(brand_domain) ||
       brand_aliases.some((alias) => r.url.toLowerCase().includes(alias.toLowerCase()))
-  );
+  ) || false;
 
   // Identify winning sources from search results
   const winningSourcesContext = search_context?.results
@@ -194,6 +195,114 @@ ${GEO_FRAMEWORK}
 
 Return your analysis as valid JSON only.`;
 
+  // Handle empty or very short responses
+  const cleanedHtml = answer_html?.trim() || "";
+  const cleanedText = input.answer_text?.trim() || "";
+  
+  // ENHANCED: Better text extraction - try multiple strategies
+  let textFromHtml = "";
+  if (cleanedHtml) {
+    textFromHtml = stripHtmlToText(cleanedHtml);
+    // Also try extracting from HTML if stripHtmlToText returned little
+    if (textFromHtml.length < 30 && cleanedHtml.length > 100) {
+      // Try another extraction - the HTML might contain the content in a different structure
+      textFromHtml = cleanedHtml
+        .replace(/<script[\s\S]*?<\/script>/gi, "")
+        .replace(/<style[\s\S]*?<\/style>/gi, "")
+        .replace(/<[^>]+>/g, " ")
+        .replace(/&nbsp;/g, " ")
+        .replace(/&amp;/g, "&")
+        .replace(/&lt;/g, "<")
+        .replace(/&gt;/g, ">")
+        .replace(/&quot;/g, '"')
+        .replace(/\s+/g, " ")
+        .trim();
+    }
+  }
+  
+  // Use the best available text source
+  let responseForAnalysis = "";
+  if (textFromHtml.length >= cleanedText.length && textFromHtml.length > 20) {
+    responseForAnalysis = textFromHtml;
+  } else if (cleanedText.length > 20) {
+    responseForAnalysis = cleanedText;
+  } else {
+    // Last resort - combine both
+    responseForAnalysis = (textFromHtml + " " + cleanedText).trim();
+  }
+  
+  // ENHANCED: More lenient minimum - ChatGPT can have short valid responses
+  const minValidLength = 30; // Reduced from 50
+  const hasValidResponse = responseForAnalysis.length > minValidLength;
+  
+  if (!hasValidResponse) {
+    console.warn(`[SelectionSignals] Empty or very short AI response (${responseForAnalysis.length} chars), checking for partial data`);
+    
+    // ENHANCED: Still do a quick visibility check even for short responses
+    // Sometimes the response is short but still mentions the brand
+    const quickVisCheck = quickVisibilityCheck(
+      responseForAnalysis || cleanedHtml || cleanedText,
+      brand_domain,
+      brand_aliases
+    );
+    
+    // Check sources for brand visibility
+    const brandInSources = search_context?.results?.some(
+      (r) =>
+        r.url.includes(brand_domain) ||
+        brand_aliases.some((alias) => r.url.toLowerCase().includes(alias.toLowerCase()))
+    ) || false;
+    
+    console.warn(`[SelectionSignals] Quick visibility: ${quickVisCheck}, Brand in sources: ${brandInSources}`);
+    
+    // Return a fallback analysis that reflects what we could determine
+    return {
+      is_visible: quickVisCheck || brandInSources,
+      sentiment: (quickVisCheck || brandInSources) ? "neutral" : "negative" as const,
+      winning_sources: search_context?.results?.slice(0, 5).map(r => r.url) || [],
+      gap_analysis: {
+        structure_score: 3,
+        data_density_score: 3,
+        directness_score: 3,
+        authority_score: 3,
+        crawlability_score: 3,
+      },
+      action_items: [],
+      competitor_insights: `Unable to fully analyze - AI response was short (${responseForAnalysis.length} chars). ${quickVisCheck ? "Brand was mentioned but context unclear." : "Brand does not appear to be mentioned."}`,
+      quick_wins: [],
+      recommendation: responseForAnalysis.length < 10 
+        ? "The AI response could not be captured properly. This may be a browser automation issue - please try running the analysis again."
+        : "The AI response was too short for full analysis. The brand may need more online presence to be included in AI responses.",
+      // Flag to indicate this was a partial analysis
+      analysis_partial: true,
+      response_length: responseForAnalysis.length,
+    } as SelectionSignals;
+  }
+
+  // Sanitize and prepare the response for analysis
+  // Remove potentially problematic characters that might cause OpenAI issues
+  let sanitizedResponse = responseForAnalysis
+    // Remove null bytes and control characters (except newlines and tabs)
+    .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '')
+    // Normalize whitespace
+    .replace(/\r\n/g, '\n')
+    .replace(/\r/g, '\n')
+    // Remove excessive consecutive newlines
+    .replace(/\n{4,}/g, '\n\n\n')
+    // Remove excessive spaces
+    .replace(/  +/g, ' ')
+    .trim();
+  
+  const MAX_RESPONSE_CHARS = 12000;
+  const clippedResponse = sanitizedResponse.length > MAX_RESPONSE_CHARS
+    ? `${sanitizedResponse.slice(0, MAX_RESPONSE_CHARS)}\n\n[Truncated for length]`
+    : sanitizedResponse;
+  
+  // Debug: Log sanitization results
+  if (sanitizedResponse.length !== responseForAnalysis.length) {
+    console.log(`[SelectionSignals] Sanitized content: ${responseForAnalysis.length} -> ${sanitizedResponse.length} chars`);
+  }
+
   const userPrompt = `Analyze this AI response and provide detailed GEO recommendations.
 
 **Query:** "${keyword}"
@@ -201,10 +310,10 @@ Return your analysis as valid JSON only.`;
 **Target Brand Domain:** ${brand_domain}
 **Brand Aliases:** ${brand_aliases.join(", ") || "None specified"}
 **Brand Found in Search Results:** ${brandInResults ? "Yes" : "No"}
-**Brand Cited in AI Response:** ${answer_html.toLowerCase().includes(brand_domain.toLowerCase()) ? "Yes" : "No"}
+**Brand Cited in AI Response:** ${responseForAnalysis.toLowerCase().includes(brand_domain.toLowerCase()) ? "Yes" : "No"}
 
 ## AI Response Given to User:
-${answer_html}
+${clippedResponse}
 
 ## Search Results That Were Available:
 ${searchResultsSummary}
@@ -252,32 +361,68 @@ IMPORTANT RULES:
   // Retry logic for API resilience
   const maxRetries = 3;
   let lastError: Error | null = null;
+  let emptyRetries = 0;
+
+  // Debug: Log input stats
+  console.log(`[SelectionSignals] Starting analysis for ${engine}, keyword: "${keyword.slice(0, 50)}..."`);
+  console.log(`[SelectionSignals] Input: ${clippedResponse.length} chars (sanitized), search results: ${search_context?.results?.length || 0}`);
+  
+  // Use a known working model, with fallback
+  const modelToUse = OPENAI_CHAT_MODEL || "gpt-4o-mini";
+  console.log(`[SelectionSignals] Using model: ${modelToUse}`);
 
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     try {
+      console.log(`[SelectionSignals] Attempt ${attempt}/${maxRetries} - Calling OpenAI (${modelToUse})...`);
+      
       const response = await openai.chat.completions.create({
-        model: OPENAI_CHAT_MODEL,
+        model: modelToUse,
         messages: [
           { role: "system", content: systemPrompt },
           { role: "user", content: userPrompt },
         ],
-        temperature: 0.4,
         response_format: { type: "json_object" },
         max_completion_tokens: 3000,
       });
 
-      const content = response.choices[0]?.message?.content;
+      // Enhanced debugging - check full response structure
+      const choice = response.choices[0];
+      const content = choice?.message?.content;
+      const finishReason = choice?.finish_reason;
+      const refusal = choice?.message?.refusal;
+      
+      console.log(`[SelectionSignals] Response: finish_reason=${finishReason}, content_length=${content?.length || 0}, refusal=${refusal || 'none'}`);
+      
+      // Check for refusal (content policy)
+      if (refusal) {
+        console.warn(`[SelectionSignals] OpenAI refused the request: ${refusal}`);
+        lastError = new Error(`OpenAI refused: ${refusal}`);
+        break; // Don't retry refusals
+      }
+      
+      // Check for content filter or other stop reasons
+      if (finishReason === 'content_filter') {
+        console.warn(`[SelectionSignals] Content was filtered by OpenAI`);
+        lastError = new Error('Content filtered by OpenAI');
+        break; // Don't retry content filter
+      }
       
       if (!content || content.trim() === "") {
+        emptyRetries++;
+        console.warn(`[SelectionSignals] Attempt ${attempt} returned empty content (finish_reason: ${finishReason})`);
+        
         if (attempt < maxRetries) {
-          console.warn(`Selection analysis attempt ${attempt} returned empty, retrying...`);
           await new Promise(resolve => setTimeout(resolve, 1000 * attempt));
           continue;
         }
-        throw new Error("No response from selection analysis after retries");
+        // All retries returned empty - don't throw, will return fallback below
+        console.warn(`[SelectionSignals] All ${maxRetries} attempts returned empty`);
+        break;
       }
+      
+      console.log(`[SelectionSignals] Got ${content.length} chars of content, parsing JSON...`);
 
-      const parsed = JSON.parse(content);
+      const parsed = parseJsonFromContent(content);
 
     // Validate and normalize the response
     return {
@@ -310,13 +455,29 @@ IMPORTANT RULES:
   }
 
   // All retries exhausted
-  console.error("Selection analysis error after all retries:", lastError);
+  console.error(`[SelectionSignals] All retries exhausted. Last error: ${lastError?.message || 'Unknown'}. Empty retries: ${emptyRetries}`);
+  
+  // Try to do a basic visibility check even if GPT analysis failed
+  const basicVisCheck = quickVisibilityCheck(
+    responseForAnalysis,
+    brand_domain,
+    brand_aliases
+  );
+  
+  console.log(`[SelectionSignals] Fallback visibility check: ${basicVisCheck}`);
+  
+  // Check if brand appears in search results (using existing variable if available)
+  const fallbackBrandInResults = search_context?.results?.some(
+    (r) =>
+      r.url.includes(brand_domain) ||
+      brand_aliases.some((alias) => r.url.toLowerCase().includes(alias.toLowerCase()))
+  ) || false;
     
-  // Return a default analysis on error
+  // Return a fallback analysis with what we can determine
   return {
-    is_visible: false,
-    sentiment: "neutral",
-    winning_sources: [],
+    is_visible: basicVisCheck || fallbackBrandInResults,
+    sentiment: (basicVisCheck || fallbackBrandInResults) ? "neutral" : "negative" as const,
+    winning_sources: search_context?.results?.slice(0, 5).map(r => r.url) || [],
     gap_analysis: {
       structure_score: 3,
       data_density_score: 3,
@@ -327,7 +488,9 @@ IMPORTANT RULES:
     action_items: [],
     competitor_insights: "",
     quick_wins: [],
-    recommendation: "Analysis could not be completed. Please try again.",
+    recommendation: `GPT analysis failed (${lastError?.message || 'empty response'}). Basic visibility check: ${basicVisCheck ? 'Brand was detected' : 'Brand was not detected'}.`,
+    analysis_partial: true,
+    response_length: responseForAnalysis.length,
   };
 }
 
@@ -458,6 +621,32 @@ function clampScore(value: unknown): number {
   const num = Number(value);
   if (isNaN(num)) return 3;
   return Math.max(1, Math.min(5, Math.round(num)));
+}
+
+function stripHtmlToText(html: string): string {
+  const withoutScripts = html.replace(/<script[\s\S]*?<\/script>/gi, " ");
+  const withoutStyles = withoutScripts.replace(/<style[\s\S]*?<\/style>/gi, " ");
+  const withoutTags = withoutStyles.replace(/<[^>]+>/g, " ");
+  return withoutTags.replace(/\s+/g, " ").trim();
+}
+
+function parseJsonFromContent(content: string): any {
+  const trimmed = content.trim();
+  const unfenced = trimmed
+    .replace(/^```(?:json)?/i, "")
+    .replace(/```$/, "")
+    .trim();
+
+  try {
+    return JSON.parse(unfenced);
+  } catch {
+    const start = unfenced.indexOf("{");
+    const end = unfenced.lastIndexOf("}");
+    if (start >= 0 && end > start) {
+      return JSON.parse(unfenced.slice(start, end + 1));
+    }
+    throw new Error("Invalid JSON returned from selection analysis.");
+  }
 }
 
 /**

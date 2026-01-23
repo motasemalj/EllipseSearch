@@ -5,6 +5,7 @@
  */
 
 import OpenAI from "openai";
+import { OPENAI_CHAT_MODEL } from "@/lib/ai/openai-config";
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
@@ -66,12 +67,11 @@ Generate the brand context JSON.`;
 
   try {
     const response = await openai.chat.completions.create({
-      model: "gpt-4o-mini",
+      model: OPENAI_CHAT_MODEL,
       messages: [
         { role: "system", content: systemPrompt },
         { role: "user", content: userPrompt },
       ],
-      temperature: 0.3,
       response_format: { type: "json_object" },
     });
 

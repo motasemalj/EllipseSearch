@@ -6,7 +6,7 @@ import { SupportedEngine } from "@/types";
 interface EngineBadgeProps {
   engine: SupportedEngine;
   showLabel?: boolean;
-  size?: "sm" | "md" | "lg";
+  size?: "xs" | "sm" | "md" | "lg";
   visibility?: number;
   className?: string;
 }
@@ -104,12 +104,14 @@ export function EngineBadge({
   const Icon = config.icon;
 
   const sizes = {
+    xs: "text-[10px] px-1.5 py-0.5 gap-0.5",
     sm: "text-xs px-2 py-0.5 gap-1",
     md: "text-sm px-3 py-1.5 gap-1.5",
     lg: "text-base px-4 py-2 gap-2",
   };
 
   const iconSizes = {
+    xs: "w-2.5 h-2.5",
     sm: "w-3 h-3",
     md: "w-4 h-4",
     lg: "w-5 h-5",

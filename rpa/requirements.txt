@@ -1,0 +1,26 @@
+# ===========================================
+# RPA Browser Automation for AEO Analysis
+# Python 3.10+ Required
+# ===========================================
+
+# Core browser automation
+playwright==1.50.0
+
+# HTTP requests for webhook
+requests>=2.31.0
+
+# Rich CLI output
+rich>=13.7.0
+
+# Environment variables
+python-dotenv>=1.0.0
+
+# Data validation
+pydantic>=2.5.0
+
+# Async support
+asyncio-throttle>=1.0.2
+
+# Retry logic
+tenacity>=8.2.0
+

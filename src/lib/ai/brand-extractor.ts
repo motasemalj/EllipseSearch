@@ -356,7 +356,6 @@ Extract:
         type: "json_schema",
         json_schema: BRAND_EXTRACTION_SCHEMA,
       },
-      temperature: 0, // Maximize consistency
     });
 
     const content = response.choices[0]?.message?.content;

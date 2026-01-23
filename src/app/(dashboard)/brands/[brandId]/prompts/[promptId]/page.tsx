@@ -352,18 +352,6 @@ export default async function PromptPage({ params }: PromptPageProps) {
         </div>
       </div>
 
-      {/* AI Accuracy Disclaimer */}
-      <div className="flex items-start gap-3 p-4 rounded-xl bg-amber-500/5 border border-amber-500/20">
-        <Info className="w-5 h-5 text-amber-600 dark:text-amber-400 mt-0.5 flex-shrink-0" />
-        <div className="text-sm">
-          <p className="font-medium text-amber-700 dark:text-amber-300">Results are estimates</p>
-          <p className="text-muted-foreground mt-0.5">
-            AI responses vary between queries and over time. These results represent simulated queries and may differ from actual user experiences. 
-            Use as directional guidance for your optimization strategy.
-          </p>
-        </div>
-      </div>
-
       {/* Overview Stats */}
       <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
         {/* Main Visibility */}
@@ -875,25 +863,174 @@ function SimulationCard({ simulation, brandName, brandDomain, userTier }: { simu
       </section>
 
       {/* ====== SECTION 4: COMPETITOR INSIGHTS ====== */}
-      {signals?.competitor_insights && (
+      {(signals?.competitor_insights || (signals?.winning_sources && signals.winning_sources.length > 0)) && (() => {
+        // Categorize sources
+        const NON_COMPETITOR_PATTERNS = [
+          /wikipedia\.org/i, /britannica\.com/i, /bbc\.(com|co\.uk)/i, /cnn\.com/i,
+          /reuters\.com/i, /nytimes\.com/i, /forbes\.com/i, /bloomberg\.com/i,
+          /theguardian\.com/i, /wsj\.com/i, /techcrunch\.com/i, /wired\.com/i,
+          /medium\.com/i, /reddit\.com/i, /quora\.com/i, /twitter\.com/i, /x\.com/i,
+          /facebook\.com/i, /instagram\.com/i, /linkedin\.com/i, /pinterest\.com/i,
+          /youtube\.com/i, /tiktok\.com/i, /github\.com/i, /stackoverflow\.com/i,
+          /gulfnews\.com/i, /khaleejtimes\.com/i, /arabianbusiness\.com/i,
+          /constructionweekonline\.com/i, /zawya\.com/i, /ameinfo\.com/i,
+          /news/i, /magazine/i, /blog/i, /times\./i, /post\./i, /herald\./i,
+          /gov\./i, /\.gov$/i, /\.edu$/i, /\.org$/i
+        ];
+        
+        const allSources = signals?.winning_sources || [];
+        const categorizedSources = allSources.map(source => {
+          let domain = source;
+          try {
+            const url = new URL(source);
+            domain = url.hostname.replace('www.', '');
+          } catch {}
+          
+          const domainLower = domain.toLowerCase();
+          const brandCore = brandDomain.toLowerCase().replace('www.', '').split('.')[0];
+          const isBrandDomain = domainLower.includes(brandCore);
+          const isNonCompetitor = NON_COMPETITOR_PATTERNS.some(p => p.test(domainLower));
+          
+          return { source, domain, isBrandDomain, isNonCompetitor };
+        });
+        
+        const competitorSources = categorizedSources.filter(s => !s.isBrandDomain && !s.isNonCompetitor);
+        const referenceSources = categorizedSources.filter(s => !s.isBrandDomain && s.isNonCompetitor);
+        const brandSources = categorizedSources.filter(s => s.isBrandDomain);
+        
+        return (
         <section id={`competitor-insights-${simulation.id}`} className="scroll-mt-20">
-          <div className="rounded-2xl border-2 border-amber-500/30 bg-gradient-to-br from-amber-500/10 via-amber-500/5 to-transparent p-6">
-            <div className="flex items-start gap-4">
-              <div className="w-12 h-12 rounded-xl bg-amber-500/20 flex items-center justify-center flex-shrink-0">
-                <Trophy className="w-6 h-6 text-amber-500" />
-              </div>
-              <div className="flex-1">
-                <div className="flex items-center gap-2 mb-2">
-                  <h2 className="text-lg font-semibold">What Winners Are Doing</h2>
-                  <span className="px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-500 text-xs font-medium">Competitive Intel</span>
-                  <SectionInfo title="Competitor Insights" description="Analysis of what the sources that DO appear in AI responses are doing right. Learn from their strategies." />
+          <div className="rounded-2xl border border-border bg-card overflow-hidden">
+            {/* Compact Header */}
+            <div className="p-4 border-b border-border bg-amber-500/5">
+              <div className="flex items-center gap-3">
+                <div className="p-2 rounded-lg bg-amber-500/20">
+                  <Trophy className="w-5 h-5 text-amber-500" />
                 </div>
-                <p className="text-muted-foreground leading-relaxed">{signals.competitor_insights}</p>
+                <div className="flex-1">
+                  <h2 className="font-semibold flex items-center gap-2">
+                    Competitor Insights
+                    <SectionInfo title="Competitor Insights" description="Shows competitors and reference sources cited by AI. Competitors are businesses similar to yours; references are news, encyclopedias, etc." />
+                  </h2>
+                  <p className="text-xs text-muted-foreground">
+                    {competitorSources.length} competitors • {referenceSources.length} references
+                    {brandSources.length > 0 && <span className="text-emerald-600 dark:text-emerald-400"> • Your brand cited</span>}
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div className="p-4 space-y-4">
+              {/* Your Brand - if cited */}
+              {brandSources.length > 0 && (
+                <div className="p-3 rounded-lg bg-emerald-500/10 border border-emerald-500/30">
+                  <div className="flex items-center gap-2 mb-1">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-500" />
+                    <span className="text-sm font-medium text-emerald-600 dark:text-emerald-400">Your Brand Was Cited!</span>
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    {brandSources.map(s => s.domain).join(', ')}
+                  </p>
+                </div>
+              )}
+              
+              {/* Actual Competitors - businesses in the same space */}
+              {competitorSources.length > 0 && (
+                <div>
+                  <h3 className="text-xs font-medium text-muted-foreground mb-2 uppercase tracking-wide">
+                    Competitors ({competitorSources.length})
+                  </h3>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    {competitorSources.slice(0, 6).map((item, idx) => (
+                      <a 
+                        key={idx}
+                        href={item.source.startsWith('http') ? item.source : `https://${item.source}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="flex items-center gap-2 p-2 rounded-lg border border-amber-500/20 bg-card hover:bg-amber-500/5 hover:border-amber-500/40 transition-colors group"
+                      >
+                        <div className="w-6 h-6 rounded bg-amber-500/20 flex items-center justify-center text-xs font-bold text-amber-600">
+                          {idx + 1}
+                        </div>
+                        <span className="text-sm font-medium truncate flex-1 group-hover:text-amber-600">{item.domain}</span>
+                        <ChevronRight className="w-3 h-3 text-muted-foreground group-hover:text-amber-500" />
+                      </a>
+                    ))}
+                  </div>
+                  {competitorSources.length > 6 && (
+                    <p className="text-xs text-muted-foreground mt-2">+{competitorSources.length - 6} more competitors</p>
+                  )}
+                </div>
+              )}
+              
+              {/* Reference Sources - news, magazines, etc. (collapsed by default) */}
+              {referenceSources.length > 0 && (
+                <details className="group">
+                  <summary className="flex items-center gap-2 cursor-pointer text-xs text-muted-foreground hover:text-foreground">
+                    <ChevronRight className="w-3 h-3 transition-transform group-open:rotate-90" />
+                    Reference Sources ({referenceSources.length}) — news, encyclopedias, etc.
+                  </summary>
+                  <div className="mt-2 flex flex-wrap gap-1.5">
+                    {referenceSources.slice(0, 8).map((item, idx) => (
+                      <a 
+                        key={idx}
+                        href={item.source.startsWith('http') ? item.source : `https://${item.source}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="px-2 py-1 text-xs rounded-full bg-muted hover:bg-muted/80 text-muted-foreground hover:text-foreground transition-colors"
+                      >
+                        {item.domain}
+                      </a>
+                    ))}
+                    {referenceSources.length > 8 && (
+                      <span className="px-2 py-1 text-xs text-muted-foreground">+{referenceSources.length - 8} more</span>
+                    )}
+                  </div>
+                </details>
+              )}
+
+              {/* AI-Generated Insights */}
+              {signals?.competitor_insights && (
+                <div className="pt-3 border-t border-border">
+                  <div className="flex items-center gap-2 mb-2">
+                    <Sparkles className="w-3.5 h-3.5 text-amber-500" />
+                    <h3 className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Key Strategies</h3>
+                  </div>
+                  <p className="text-sm text-muted-foreground leading-relaxed">{signals.competitor_insights}</p>
+                </div>
+              )}
+
+              {/* Compact Actionable Takeaway */}
+              <div className="pt-3 border-t border-border">
+                <div className={`flex items-center gap-3 p-3 rounded-lg ${
+                  simulation.is_visible 
+                    ? 'bg-emerald-500/5 border border-emerald-500/20' 
+                    : 'bg-amber-500/5 border border-amber-500/20'
+                }`}>
+                  {simulation.is_visible ? (
+                    <>
+                      <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0" />
+                      <p className="text-sm">
+                        <span className="font-medium text-emerald-600 dark:text-emerald-400">You&apos;re in the mix!</span>
+                        <span className="text-muted-foreground"> Focus on differentiating from the {competitorSources.length} competitors above.</span>
+                      </p>
+                    </>
+                  ) : (
+                    <>
+                      <Target className="w-4 h-4 text-amber-500 shrink-0" />
+                      <p className="text-sm">
+                        <span className="font-medium text-amber-600 dark:text-amber-400">Not yet cited.</span>
+                        <span className="text-muted-foreground"> Study what {competitorSources.slice(0, 2).map(s => s.domain).join(' and ')} are doing differently.</span>
+                      </p>
+                    </>
+                  )}
+                </div>
               </div>
             </div>
           </div>
         </section>
-      )}
+        );
+      })()}
 
       {/* ====== SECTION 5: QUICK WINS ====== */}
       {signals?.quick_wins && signals.quick_wins.length > 0 && (
@@ -986,6 +1123,8 @@ function SimulationCard({ simulation, brandName, brandDomain, userTier }: { simu
             <CitationAuthorityPanel
               sources={citationAuthorities}
               brandDomain={brandDomain}
+              brandName={brandName}
+              isBrandVisible={simulation.is_visible}
             />
           </div>
         ) : (

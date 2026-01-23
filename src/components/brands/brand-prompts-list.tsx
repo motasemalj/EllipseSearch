@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
@@ -23,6 +23,10 @@ import {
   Globe,
   ArrowUp,
   CheckCircle,
+  Trash2,
+  MoreVertical,
+  Calendar,
+  Repeat,
 } from "lucide-react";
 import { ChatGPTIcon, PerplexityIcon, GeminiIcon, GrokIcon } from "@/components/ui/engine-badge";
 import {
@@ -33,8 +37,33 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Label } from "@/components/ui/label";
+import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
 import { SupportedEngine, BillingTier, TIER_LIMITS, SupportedRegion, REGIONS } from "@/types";
 import { createClient } from "@/lib/supabase/client";
@@ -61,12 +90,20 @@ const engines: { id: SupportedEngine; name: string; icon: React.ReactNode }[] = 
   { id: "grok", name: "Grok", icon: <GrokIcon className="w-4 h-4" /> },
 ];
 
+const SCHEDULE_OPTIONS = [
+  { value: "none", label: "One-time analysis" },
+  { value: "daily", label: "Daily" },
+  { value: "weekly", label: "Weekly" },
+  { value: "biweekly", label: "Every 2 weeks" },
+  { value: "monthly", label: "Monthly" },
+];
+
 export function BrandPromptsList({ brandId, prompts }: BrandPromptsListProps) {
   const router = useRouter();
   const [isAnalyzing, setIsAnalyzing] = useState<string | null>(null);
   const [recentlyStartedIds, setRecentlyStartedIds] = useState<string[]>([]);
   const [runningPromptIds, setRunningPromptIds] = useState<string[]>([]);
-  const [justRanIds, setJustRanIds] = useState<Set<string>>(new Set()); // Track prompts that just finished
+  const [justRanIds, setJustRanIds] = useState<Set<string>>(new Set());
   const [isCrawling, setIsCrawling] = useState(false);
   const [showAnalyzeDialog, setShowAnalyzeDialog] = useState(false);
   const [selectedPromptId, setSelectedPromptId] = useState<string | null>(null);
@@ -78,30 +115,36 @@ export function BrandPromptsList({ brandId, prompts }: BrandPromptsListProps) {
   const [hasCrawledData, setHasCrawledData] = useState(false);
   const [creditsBalance, setCreditsBalance] = useState<number>(0);
   const [brandDomain, setBrandDomain] = useState<string>("");
+  const [promptToDelete, setPromptToDelete] = useState<PromptWithStats | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [schedule, setSchedule] = useState<string>("none");
 
   // Fetch running prompt IDs and track completions
   useEffect(() => {
     const supabase = createClient();
     let previousRunningIds = new Set<string>();
+    let isMounted = true;
     
     const fetchRunning = async () => {
-      // Get running batches
+      if (!isMounted) return;
+      
       const { data: batches } = await supabase
         .from("analysis_batches")
-        .select("id, prompt_set_id")
+        .select("id, prompt_set_id, prompt_id")
         .eq("brand_id", brandId)
-        .in("status", ["queued", "processing"]);
+        .in("status", ["queued", "processing", "awaiting_rpa"]);
+
+      if (!isMounted) return;
 
       if (!batches || batches.length === 0) {
-        // Check if any prompts just finished (were running, now not)
         if (previousRunningIds.size > 0) {
           setJustRanIds(prev => {
             const newSet = new Set(prev);
             previousRunningIds.forEach(id => newSet.add(id));
             return newSet;
           });
-          // Clear "just ran" status after 2 minutes
           setTimeout(() => {
+            if (!isMounted) return;
             setJustRanIds(prev => {
               const newSet = new Set(prev);
               previousRunningIds.forEach(id => newSet.delete(id));
@@ -115,33 +158,48 @@ export function BrandPromptsList({ brandId, prompts }: BrandPromptsListProps) {
       }
 
       const promptIds = new Set<string>();
-
-      // Get simulations for running batches
-      const batchIds = batches.map(b => b.id);
-      const { data: sims } = await supabase
-        .from("simulations")
-        .select("prompt_id")
-        .in("analysis_batch_id", batchIds);
-
-      (sims || []).forEach(s => promptIds.add(s.prompt_id));
-
-      // Get prompts from prompt sets
-      for (const batch of batches) {
-        if (batch.prompt_set_id) {
-          const { data: setPrompts } = await supabase
-            .from("prompts")
-            .select("id")
-            .eq("prompt_set_id", batch.prompt_set_id);
-          (setPrompts || []).forEach(p => promptIds.add(p.id));
+      
+      // First check if batch has a direct prompt_id
+      batches.forEach(batch => {
+        if (batch.prompt_id) {
+          promptIds.add(batch.prompt_id);
         }
-      }
+      });
+      
+      // Then check simulations for each batch
+      const batchIds = batches.map(b => b.id);
+      const promptSetIds = Array.from(
+        new Set(batches.map(b => b.prompt_set_id).filter(Boolean))
+      ) as string[];
+      const [simsResult, setPromptsResult] = await Promise.all([
+        supabase
+          .from("simulations")
+          .select("prompt_id")
+          .in("analysis_batch_id", batchIds),
+        promptSetIds.length > 0
+          ? supabase
+              .from("prompts")
+              .select("id, prompt_set_id")
+              .in("prompt_set_id", promptSetIds)
+          : Promise.resolve({ data: [] }),
+      ]);
 
-      // Track which prompts just finished running
+      if (!isMounted) return;
+      (simsResult.data || []).forEach(s => {
+        if (s.prompt_id) promptIds.add(s.prompt_id);
+      });
+
+      (setPromptsResult.data || []).forEach(p => {
+        if (p.id) promptIds.add(p.id);
+      });
+
+      if (!isMounted) return;
+
       Array.from(previousRunningIds).forEach(id => {
         if (!promptIds.has(id)) {
           setJustRanIds(prev => new Set([...Array.from(prev), id]));
-          // Clear "just ran" status after 2 minutes
           setTimeout(() => {
+            if (!isMounted) return;
             setJustRanIds(prev => {
               const newSet = new Set(prev);
               newSet.delete(id);
@@ -156,11 +214,32 @@ export function BrandPromptsList({ brandId, prompts }: BrandPromptsListProps) {
     };
 
     fetchRunning();
-    const interval = setInterval(fetchRunning, 2000);
-    return () => clearInterval(interval);
+
+    const batchesChannel = supabase
+      .channel(`running-batches-${brandId}`)
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "analysis_batches", filter: `brand_id=eq.${brandId}` },
+        () => fetchRunning()
+      )
+      .subscribe();
+
+    const simulationsChannel = supabase
+      .channel(`running-simulations-${brandId}`)
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "simulations", filter: `brand_id=eq.${brandId}` },
+        () => fetchRunning()
+      )
+      .subscribe();
+
+    return () => {
+      isMounted = false;
+      supabase.removeChannel(batchesChannel);
+      supabase.removeChannel(simulationsChannel);
+    };
   }, [brandId]);
 
-  // Also check for recently completed analyses on mount
   useEffect(() => {
     const checkRecentlyCompleted = async () => {
       const supabase = createClient();
@@ -181,7 +260,6 @@ export function BrandPromptsList({ brandId, prompts }: BrandPromptsListProps) {
         );
         setJustRanIds(recentIds);
         
-        // Clear after 2 minutes
         setTimeout(() => {
           setJustRanIds(new Set());
         }, 120000);
@@ -191,46 +269,37 @@ export function BrandPromptsList({ brandId, prompts }: BrandPromptsListProps) {
     checkRecentlyCompleted();
   }, [brandId]);
 
-  // Memoize the running IDs set to prevent unnecessary re-renders
   const stableRunningIds = useMemo(() => {
     return new Set([...runningPromptIds, ...recentlyStartedIds]);
   }, [runningPromptIds, recentlyStartedIds]);
 
-  // Sort prompts: Running > New (never analyzed) > Recently analyzed
-  // Server already returns prompts sorted by created_at DESC (newest first)
   const sortedPrompts = useMemo(() => {
     return [...prompts].sort((a, b) => {
       const aIsRunning = stableRunningIds.has(a.id);
       const bIsRunning = stableRunningIds.has(b.id);
       
-      // 1. Running prompts first
       if (aIsRunning && !bIsRunning) return -1;
       if (!aIsRunning && bIsRunning) return 1;
       
-      // 2. New prompts (never analyzed) second
       const aIsNew = a.total_sims === 0;
       const bIsNew = b.total_sims === 0;
       if (aIsNew && !bIsNew) return -1;
       if (!aIsNew && bIsNew) return 1;
       
-      // 3. Both new: maintain server order (already sorted by created_at DESC)
       if (aIsNew && bIsNew) {
         return prompts.indexOf(a) - prompts.indexOf(b);
       }
       
-      // 4. Both analyzed: sort by last_checked_at (most recent first)
       const aDate = a.last_checked_at ? new Date(a.last_checked_at).getTime() : 0;
       const bDate = b.last_checked_at ? new Date(b.last_checked_at).getTime() : 0;
       return bDate - aDate;
     });
   }, [prompts, stableRunningIds]);
 
-  // Fetch user tier, credits, and brand crawl status when dialog opens
   useEffect(() => {
     async function fetchData() {
       const supabase = createClient();
       
-      // Get user's organization tier and credits
       const { data: { user } } = await supabase.auth.getUser();
       if (user) {
         const { data: profile } = await supabase
@@ -253,7 +322,6 @@ export function BrandPromptsList({ brandId, prompts }: BrandPromptsListProps) {
         }
       }
 
-      // Check if brand has been crawled
       const { data: brand } = await supabase
         .from("brands")
         .select("last_crawled_at, domain")
@@ -284,7 +352,6 @@ export function BrandPromptsList({ brandId, prompts }: BrandPromptsListProps) {
     });
   };
 
-  // Trigger crawl when enabling watchdog if no crawl data exists
   const handleToggleWatchdog = async () => {
     if (!canUseWatchdog) return;
     
@@ -321,35 +388,58 @@ export function BrandPromptsList({ brandId, prompts }: BrandPromptsListProps) {
     setEnableWatchdog(!enableWatchdog);
   };
 
-  const pollCrawlStatus = async () => {
+  const pollCrawlStatus = useCallback(async () => {
     const supabase = createClient();
-    let attempts = 0;
-    const maxAttempts = 60;
+    let finished = false;
+    let channel: ReturnType<typeof supabase.channel> | null = null;
 
-    const checkStatus = async () => {
-      const { data: brand } = await supabase
-        .from("brands")
-        .select("last_crawled_at")
-        .eq("id", brandId)
-        .single();
-
-      if (brand?.last_crawled_at) {
-        setHasCrawledData(true);
-        setIsCrawling(false);
-        toast.success("Website crawl complete!");
-        return;
-      }
-
-      attempts++;
-      if (attempts < maxAttempts) {
-        setTimeout(checkStatus, 5000);
-      } else {
-        setIsCrawling(false);
+    const handleComplete = () => {
+      if (finished) return;
+      finished = true;
+      setHasCrawledData(true);
+      setIsCrawling(false);
+      toast.success("Website crawl complete!");
+      if (channel) {
+        supabase.removeChannel(channel);
       }
     };
 
-    checkStatus();
-  };
+    const finalize = () => {
+      if (finished) return;
+      finished = true;
+      setIsCrawling(false);
+      if (channel) {
+        supabase.removeChannel(channel);
+      }
+    };
+
+    const { data: brand } = await supabase
+      .from("brands")
+      .select("last_crawled_at")
+      .eq("id", brandId)
+      .single();
+
+    if (brand?.last_crawled_at) {
+      handleComplete();
+      return;
+    }
+
+    channel = supabase
+      .channel(`brand-crawl-${brandId}`)
+      .on(
+        "postgres_changes",
+        { event: "UPDATE", schema: "public", table: "brands", filter: `id=eq.${brandId}` },
+        (payload) => {
+          const updated = payload.new as { last_crawled_at?: string | null };
+          if (updated?.last_crawled_at) {
+            handleComplete();
+          }
+        }
+      )
+      .subscribe();
+
+    setTimeout(finalize, 5 * 60 * 1000);
+  }, [brandId]);
 
   const handleRunAnalysis = async (promptId: string) => {
     if (!hasEnoughCredits) {
@@ -372,6 +462,7 @@ export function BrandPromptsList({ brandId, prompts }: BrandPromptsListProps) {
           language,
           region,
           enable_hallucination_watchdog: canUseWatchdog && enableWatchdog && hasCrawledData,
+          schedule: schedule !== "none" ? schedule : undefined,
         }),
       });
 
@@ -381,7 +472,6 @@ export function BrandPromptsList({ brandId, prompts }: BrandPromptsListProps) {
         throw new Error(data.error || "Failed to start analysis");
       }
 
-      // Add to recently started to move to top of list
       setRecentlyStartedIds(prev => Array.from(new Set([promptId, ...prev])));
 
       const watchdogMessage = enableWatchdog && canUseWatchdog && hasCrawledData
@@ -390,12 +480,17 @@ export function BrandPromptsList({ brandId, prompts }: BrandPromptsListProps) {
       
       const regionInfo = REGIONS.find(r => r.id === region);
       const regionMessage = region !== "global" ? ` Region: ${regionInfo?.flag} ${regionInfo?.name}.` : "";
+      
+      const scheduleMessage = schedule !== "none" 
+        ? ` Scheduled to repeat ${SCHEDULE_OPTIONS.find(s => s.value === schedule)?.label.toLowerCase()}.` 
+        : "";
 
       toast.success("Analysis started!", {
-        description: `Running ${selectedEngines.length} simulations. Check the Analyses section below.${regionMessage}${watchdogMessage}`,
+        description: `Running ${selectedEngines.length} simulations.${regionMessage}${watchdogMessage}${scheduleMessage}`,
       });
 
       setShowAnalyzeDialog(false);
+      setSchedule("none");
       router.refresh();
     } catch (error) {
       console.error("Failed to start analysis:", error);
@@ -407,23 +502,55 @@ export function BrandPromptsList({ brandId, prompts }: BrandPromptsListProps) {
     }
   };
 
+  const handleDeletePrompt = async () => {
+    if (!promptToDelete) return;
+    
+    setIsDeleting(true);
+    try {
+      const supabase = createClient();
+      
+      // Delete simulations first (foreign key constraint)
+      await supabase
+        .from("simulations")
+        .delete()
+        .eq("prompt_id", promptToDelete.id);
+      
+      // Delete the prompt
+      const { error } = await supabase
+        .from("prompts")
+        .delete()
+        .eq("id", promptToDelete.id);
+      
+      if (error) throw error;
+      
+      toast.success("Prompt deleted", {
+        description: "The prompt and its analysis history have been removed.",
+      });
+      
+      setPromptToDelete(null);
+      router.refresh();
+    } catch (error) {
+      console.error("Failed to delete prompt:", error);
+      toast.error("Failed to delete prompt", {
+        description: error instanceof Error ? error.message : "Please try again.",
+      });
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
   const openAnalyzeDialog = (promptId: string) => {
     setSelectedPromptId(promptId);
     setShowAnalyzeDialog(true);
   };
 
-  // Combine external running IDs with locally tracked ones
-  // MUST be called before any early returns to satisfy React hooks rules
   const allRunningIds = useMemo(() => 
     new Set([...runningPromptIds, ...recentlyStartedIds.filter(id => runningPromptIds.includes(id))]),
     [runningPromptIds, recentlyStartedIds]
   );
 
-  // Clear recently started IDs that are no longer running (analysis completed)
-  // MUST be called before any early returns to satisfy React hooks rules
   useEffect(() => {
     if (runningPromptIds.length === 0 && recentlyStartedIds.length > 0) {
-      // Clear after a delay to allow UI to update
       const timeout = setTimeout(() => {
         setRecentlyStartedIds([]);
       }, 2000);
@@ -496,9 +623,8 @@ export function BrandPromptsList({ brandId, prompts }: BrandPromptsListProps) {
         return (
           <div
             key={prompt.id}
-            className={`group relative transition-all duration-300 ${wasJustStarted ? 'animate-pulse' : ''} ${hasJustRan ? 'ring-2 ring-emerald-500/30 ring-offset-2 ring-offset-background rounded-xl' : ''}`}
+            className={`group relative transition-all duration-300 ${hasJustRan ? 'ring-2 ring-emerald-500/30 ring-offset-2 ring-offset-background rounded-xl' : ''}`}
           >
-            {/* "Running" indicator */}
             {wasJustStarted && (
               <div className="absolute -top-2 left-4 z-10 flex items-center gap-1 px-2 py-0.5 rounded-full bg-primary text-primary-foreground text-[10px] font-medium shadow-sm">
                 <ArrowUp className="w-3 h-3" />
@@ -506,84 +632,146 @@ export function BrandPromptsList({ brandId, prompts }: BrandPromptsListProps) {
               </div>
             )}
             
-            {/* "Just Ran" indicator */}
             {hasJustRan && !wasJustStarted && (
-              <div className="absolute -top-2 left-4 z-10 flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-500 text-white text-[10px] font-medium shadow-sm animate-pulse">
+              <div className="absolute -top-2 left-4 z-10 flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-500 text-white text-[10px] font-medium shadow-sm">
                 <CheckCircle className="w-3 h-3" />
                 Just Ran
               </div>
             )}
             
-            {/* Main Card - Clickable if has analysis and not running */}
-            {hasAnalysis && !isRunning ? (
-              <Link
-                href={`/brands/${brandId}/prompts/${prompt.id}`}
-                className="block"
-              >
-                <PromptCard
-                  prompt={prompt}
-                  visibility={visibility}
-                  getVisibilityColor={getVisibilityColor}
-                  getVisibilityIcon={getVisibilityIcon}
-                  isClickable={true}
-                  isRunning={isRunning}
-                  hasJustRan={hasJustRan}
-                />
-              </Link>
-            ) : (
-              <PromptCard
-                prompt={prompt}
-                visibility={visibility}
-                getVisibilityColor={getVisibilityColor}
-                getVisibilityIcon={getVisibilityIcon}
-                isClickable={false}
-                isRunning={isRunning}
-                hasJustRan={hasJustRan}
-              />
-            )}
-
-            {/* Quick Actions Overlay */}
-            <div className="absolute right-4 top-1/2 -translate-y-1/2 flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-              {hasAnalysis && !isRunning && (
-                <Link href={`/brands/${brandId}/prompts/${prompt.id}`}>
-                  <Button size="sm" variant="secondary" className="gap-1.5 h-8 shadow-sm">
-                    <BarChart3 className="w-3.5 h-3.5" />
-                    View Results
-                  </Button>
-                </Link>
-              )}
-              {isRunning ? (
-                <Button size="sm" variant="secondary" className="gap-1.5 h-8 shadow-sm" disabled>
-                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                  Analyzing...
-                </Button>
-              ) : (
-                <Button 
-                  size="sm" 
-                  className="gap-1.5 h-8 shadow-sm"
-                  onClick={(e) => {
+            <div className={`flex items-center gap-4 p-4 rounded-xl border bg-card transition-all ${
+              isRunning
+                ? "border-primary/50 bg-primary/5 ring-1 ring-primary/20"
+                : hasJustRan
+                  ? "border-emerald-500/50 bg-emerald-500/5"
+                  : hasAnalysis 
+                    ? "hover:border-primary/40 hover:bg-primary/5 cursor-pointer hover:shadow-md" 
+                    : "border-border"
+            }`}>
+              {/* Visibility Badge */}
+              <div className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-semibold min-w-[80px] justify-center ${getVisibilityColor(visibility)}`}>
+                {getVisibilityIcon(visibility)}
+                {isRunning ? "Running" : visibility !== null ? `${visibility}%` : "New"}
+              </div>
+              
+              {/* Prompt Text - Clickable if has analysis */}
+              <Link 
+                href={hasAnalysis && !isRunning ? `/brands/${brandId}/prompts/${prompt.id}` : "#"}
+                className={`flex-1 min-w-0 ${hasAnalysis && !isRunning ? "" : "pointer-events-none"}`}
+                onClick={(e) => {
+                  if (!hasAnalysis || isRunning) {
                     e.preventDefault();
-                    e.stopPropagation();
-                    openAnalyzeDialog(prompt.id);
-                  }}
-                  disabled={isAnalyzing === prompt.id}
-                >
-                  {isAnalyzing === prompt.id ? (
-                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                  ) : (
-                    <Play className="w-3.5 h-3.5" />
+                  }
+                }}
+              >
+                <p className="font-medium text-foreground leading-snug truncate pr-32">
+                  {prompt.text}
+                </p>
+                <div className="flex items-center gap-3 mt-1 text-xs text-muted-foreground">
+                  {prompt.set_name && (
+                    <span className="px-2 py-0.5 rounded-full bg-muted border border-border">
+                      {prompt.set_name}
+                    </span>
                   )}
-                  {hasAnalysis ? "Re-analyze" : "Analyze"}
-                </Button>
+                  {isRunning ? (
+                    <span className="flex items-center gap-1 text-primary">
+                      <Loader2 className="w-3 h-3 animate-spin" />
+                      Analysis in progress...
+                    </span>
+                  ) : (
+                    <>
+                      {prompt.total_sims > 0 && (
+                        <span className="flex items-center gap-1">
+                          <Eye className="w-3 h-3" />
+                          {prompt.visible_sims}/{prompt.total_sims} visible
+                        </span>
+                      )}
+                      {prompt.last_checked_at && (
+                        <span className="flex items-center gap-1">
+                          <Clock className="w-3 h-3" />
+                          {new Date(prompt.last_checked_at).toLocaleDateString()}
+                        </span>
+                      )}
+                    </>
+                  )}
+                </div>
+              </Link>
+
+              {/* Actions */}
+              <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                {hasAnalysis && !isRunning && (
+                  <Link href={`/brands/${brandId}/prompts/${prompt.id}`}>
+                    <Button size="sm" variant="secondary" className="gap-1.5 h-8 shadow-sm">
+                      <BarChart3 className="w-3.5 h-3.5" />
+                      View
+                    </Button>
+                  </Link>
+                )}
+                {isRunning ? (
+                  <Button size="sm" variant="secondary" className="gap-1.5 h-8 shadow-sm" disabled>
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    Analyzing...
+                  </Button>
+                ) : (
+                  <Button 
+                    size="sm" 
+                    className="gap-1.5 h-8 shadow-sm"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      openAnalyzeDialog(prompt.id);
+                    }}
+                    disabled={isAnalyzing === prompt.id}
+                  >
+                    {isAnalyzing === prompt.id ? (
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    ) : (
+                      <Play className="w-3.5 h-3.5" />
+                    )}
+                    {hasAnalysis ? "Re-run" : "Analyze"}
+                  </Button>
+                )}
+                
+                {/* More Options Menu */}
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button variant="ghost" size="icon" className="h-8 w-8">
+                      <MoreVertical className="w-4 h-4" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end">
+                    {hasAnalysis && (
+                      <>
+                        <DropdownMenuItem onClick={() => window.open(`/brands/${brandId}/prompts/${prompt.id}`, '_blank')}>
+                          <BarChart3 className="w-4 h-4 mr-2" />
+                          View Results
+                        </DropdownMenuItem>
+                        <DropdownMenuSeparator />
+                      </>
+                    )}
+                    <DropdownMenuItem 
+                      onClick={() => setPromptToDelete(prompt)}
+                      className="text-red-600 focus:text-red-600"
+                    >
+                      <Trash2 className="w-4 h-4 mr-2" />
+                      Delete Prompt
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </div>
+
+              {/* Chevron for clickable cards */}
+              {hasAnalysis && !isRunning && (
+                <ChevronRight className="w-5 h-5 text-muted-foreground group-hover:text-primary transition-colors flex-shrink-0" />
               )}
             </div>
           </div>
         );
       })}
 
-      {/* Analyze Dialog - UPDATED with Hallucination Watchdog and Credits */}
+      {/* Analyze Dialog */}
       <Dialog open={showAnalyzeDialog} onOpenChange={setShowAnalyzeDialog}>
-        <DialogContent className="sm:max-w-lg">
+        <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Run AI Analysis</DialogTitle>
             <DialogDescription>
@@ -653,7 +841,7 @@ export function BrandPromptsList({ brandId, prompts }: BrandPromptsListProps) {
                 <Label className="text-sm font-medium">Search Region</Label>
               </div>
               <p className="text-xs text-muted-foreground">
-                AI search results will be localized to this region for accuracy
+                AI search results will be localized to this region
               </p>
               <div className="grid grid-cols-3 sm:grid-cols-4 gap-1.5 max-h-[140px] overflow-y-auto p-1 rounded-lg border border-border bg-muted/30">
                 {REGIONS.map((r) => {
@@ -676,7 +864,34 @@ export function BrandPromptsList({ brandId, prompts }: BrandPromptsListProps) {
               </div>
             </div>
 
-            {/* Hallucination Watchdog Toggle - PRO FEATURE */}
+            {/* Schedule Selection - NEW */}
+            <div className="space-y-2">
+              <div className="flex items-center gap-2">
+                <Repeat className="w-4 h-4 text-muted-foreground" />
+                <Label className="text-sm font-medium">Run Schedule</Label>
+                <Badge variant="outline" className="text-[10px] px-1.5 py-0">NEW</Badge>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Automatically re-run this analysis on a schedule
+              </p>
+              <Select value={schedule} onValueChange={setSchedule}>
+                <SelectTrigger className="w-full">
+                  <SelectValue placeholder="Select schedule" />
+                </SelectTrigger>
+                <SelectContent>
+                  {SCHEDULE_OPTIONS.map(option => (
+                    <SelectItem key={option.value} value={option.value}>
+                      <span className="flex items-center gap-2">
+                        {option.value !== "none" && <Calendar className="w-3.5 h-3.5" />}
+                        {option.label}
+                      </span>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            {/* Hallucination Watchdog Toggle */}
             <div className="space-y-2">
               <div className="flex items-center gap-2">
                 <Label className="text-sm font-medium">AI Hallucination Detection</Label>
@@ -747,9 +962,17 @@ export function BrandPromptsList({ brandId, prompts }: BrandPromptsListProps) {
               )}
             </div>
 
+            {/* Disclaimer - Only shown here */}
+            <div className="flex items-start gap-2 p-3 rounded-lg bg-amber-500/5 border border-amber-500/20">
+              <AlertTriangle className="w-4 h-4 text-amber-600 dark:text-amber-400 mt-0.5 flex-shrink-0" />
+              <div className="text-xs text-muted-foreground">
+                <p className="font-medium text-amber-700 dark:text-amber-300 mb-0.5">Results may vary</p>
+                <p>AI responses change between queries. Use as directional guidance.</p>
+              </div>
+            </div>
+
             {/* Credits Summary */}
             <div className="rounded-lg bg-gradient-to-br from-muted/50 to-muted/30 p-3 space-y-2">
-              {/* Credit Balance */}
               <div className="flex items-center justify-between p-2 rounded-md bg-background/50 border border-border">
                 <div className="flex items-center gap-1.5">
                   <Coins className="w-3.5 h-3.5 text-primary" />
@@ -760,7 +983,6 @@ export function BrandPromptsList({ brandId, prompts }: BrandPromptsListProps) {
                 </span>
               </div>
 
-              {/* Cost */}
               <div className="flex items-center justify-between text-sm">
                 <span className="text-muted-foreground">Credit Cost</span>
                 <span className={`font-bold ${hasEnoughCredits ? "text-primary" : "text-red-500"}`}>
@@ -819,85 +1041,47 @@ export function BrandPromptsList({ brandId, prompts }: BrandPromptsListProps) {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </div>
-  );
-}
 
-// Extracted card component for cleaner code
-function PromptCard({ 
-  prompt, 
-  visibility, 
-  getVisibilityColor, 
-  getVisibilityIcon,
-  isClickable,
-  isRunning = false,
-  hasJustRan = false,
-}: {
-  prompt: PromptWithStats;
-  visibility: number | null;
-  getVisibilityColor: (v: number | null) => string;
-  getVisibilityIcon: (v: number | null) => React.ReactNode;
-  isClickable: boolean;
-  isRunning?: boolean;
-  hasJustRan?: boolean;
-}) {
-  return (
-    <div
-      className={`flex items-center gap-4 p-4 rounded-xl border bg-card transition-all ${
-        isRunning
-          ? "border-primary/50 bg-primary/5 ring-1 ring-primary/20"
-          : hasJustRan
-            ? "border-emerald-500/50 bg-emerald-500/5"
-            : isClickable 
-              ? "hover:border-primary/40 hover:bg-primary/5 cursor-pointer hover:shadow-md" 
-              : "border-border"
-      }`}
-    >
-      {/* Visibility Badge */}
-      <div className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-semibold min-w-[80px] justify-center ${getVisibilityColor(visibility)}`}>
-        {getVisibilityIcon(visibility)}
-        {isRunning ? "Running" : visibility !== null ? `${visibility}%` : "New"}
-      </div>
-      
-      {/* Prompt Text */}
-      <div className="flex-1 min-w-0">
-        <p className="font-medium text-foreground leading-snug truncate pr-32">
-          {prompt.text}
-        </p>
-        <div className="flex items-center gap-3 mt-1 text-xs text-muted-foreground">
-          {prompt.set_name && (
-            <span className="px-2 py-0.5 rounded-full bg-muted border border-border">
-              {prompt.set_name}
-            </span>
-          )}
-          {isRunning ? (
-            <span className="flex items-center gap-1 text-primary">
-              <Loader2 className="w-3 h-3 animate-spin" />
-              Analysis in progress...
-            </span>
-          ) : (
-            <>
-              {prompt.total_sims > 0 && (
-                <span className="flex items-center gap-1">
-                  <Eye className="w-3 h-3" />
-                  {prompt.visible_sims}/{prompt.total_sims} visible
+      {/* Delete Confirmation Dialog */}
+      <AlertDialog open={!!promptToDelete} onOpenChange={(open) => !open && setPromptToDelete(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2">
+              <Trash2 className="w-5 h-5 text-red-500" />
+              Delete Prompt?
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              This will permanently delete this prompt and all its analysis history.
+              <br /><br />
+              <span className="font-medium text-foreground">
+                &ldquo;{promptToDelete?.text}&rdquo;
+              </span>
+              {promptToDelete?.total_sims ? (
+                <span className="block mt-2 text-amber-600 dark:text-amber-400">
+                  This will delete {promptToDelete.total_sims} simulation{promptToDelete.total_sims > 1 ? 's' : ''}.
                 </span>
+              ) : null}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isDeleting}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleDeletePrompt}
+              disabled={isDeleting}
+              className="bg-red-600 hover:bg-red-700 text-white"
+            >
+              {isDeleting ? (
+                <>
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  Deleting...
+                </>
+              ) : (
+                "Delete Prompt"
               )}
-              {prompt.last_checked_at && (
-                <span className="flex items-center gap-1">
-                  <Clock className="w-3 h-3" />
-                  {new Date(prompt.last_checked_at).toLocaleDateString()}
-                </span>
-              )}
-            </>
-          )}
-        </div>
-      </div>
-
-      {/* Chevron for clickable cards */}
-      {isClickable && !isRunning && (
-        <ChevronRight className="w-5 h-5 text-muted-foreground group-hover:text-primary transition-colors flex-shrink-0" />
-      )}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

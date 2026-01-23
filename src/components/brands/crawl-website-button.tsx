@@ -71,16 +71,17 @@ export function CrawlWebsiteButton({ brandId, domain, lastCrawledAt }: CrawlWebs
     fetchCrawlStatus();
   }, [fetchCrawlStatus]);
 
-  // Polling for active crawls
+  // Realtime updates for active crawls
   useEffect(() => {
     if (!isPolling) return;
+    const supabase = createClient();
 
-    const pollInterval = setInterval(async () => {
+    const handleStatus = async () => {
       const status = await fetchCrawlStatus();
       if (status?.status === "completed" || status?.status === "failed") {
         setIsPolling(false);
         setIsLoading(false);
-        
+
         if (status.status === "completed") {
           toast.success("Website crawl completed!", {
             description: `${status.total_pages_crawled} pages crawled successfully.`,
@@ -92,10 +93,23 @@ export function CrawlWebsiteButton({ brandId, domain, lastCrawledAt }: CrawlWebs
           });
         }
       }
-    }, 3000); // Poll every 3 seconds
+    };
 
-    return () => clearInterval(pollInterval);
-  }, [isPolling, fetchCrawlStatus, router]);
+    handleStatus();
+
+    const channel = supabase
+      .channel(`crawl-jobs-${brandId}`)
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "crawl_jobs", filter: `brand_id=eq.${brandId}` },
+        () => handleStatus()
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [isPolling, fetchCrawlStatus, router, brandId]);
 
   const handleStartCrawl = async () => {
     setIsLoading(true);

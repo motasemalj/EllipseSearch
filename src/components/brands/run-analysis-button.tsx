@@ -170,34 +170,57 @@ export function RunAnalysisButton({ brandId, keywordSetId, keywordsCount }: RunA
 
   const pollCrawlStatus = async () => {
     const supabase = createClient();
-    let attempts = 0;
-    const maxAttempts = 60; // 5 minutes max
+    let finished = false;
+    let channel: ReturnType<typeof supabase.channel> | null = null;
 
-    const checkStatus = async () => {
-      const { data: brand } = await supabase
-        .from("brands")
-        .select("last_crawled_at")
-        .eq("id", brandId)
-        .single();
-
-      if (brand?.last_crawled_at) {
-        setHasCrawledData(true);
-        setIsCrawling(false);
-        toast.success("Website crawl complete!", {
-          description: "Hallucination detection is now ready.",
-        });
-        return;
-      }
-
-      attempts++;
-      if (attempts < maxAttempts) {
-        setTimeout(checkStatus, 5000); // Check every 5 seconds
-      } else {
-        setIsCrawling(false);
+    const handleComplete = () => {
+      if (finished) return;
+      finished = true;
+      setHasCrawledData(true);
+      setIsCrawling(false);
+      toast.success("Website crawl complete!", {
+        description: "Hallucination detection is now ready.",
+      });
+      if (channel) {
+        supabase.removeChannel(channel);
       }
     };
 
-    checkStatus();
+    const finalize = () => {
+      if (finished) return;
+      finished = true;
+      setIsCrawling(false);
+      if (channel) {
+        supabase.removeChannel(channel);
+      }
+    };
+
+    const { data: brand } = await supabase
+      .from("brands")
+      .select("last_crawled_at")
+      .eq("id", brandId)
+      .single();
+
+    if (brand?.last_crawled_at) {
+      handleComplete();
+      return;
+    }
+
+    channel = supabase
+      .channel(`brand-crawl-${brandId}`)
+      .on(
+        "postgres_changes",
+        { event: "UPDATE", schema: "public", table: "brands", filter: `id=eq.${brandId}` },
+        (payload) => {
+          const updated = payload.new as { last_crawled_at?: string | null };
+          if (updated?.last_crawled_at) {
+            handleComplete();
+          }
+        }
+      )
+      .subscribe();
+
+    setTimeout(finalize, 5 * 60 * 1000);
   };
 
   const handleRun = async () => {

@@ -19,6 +19,8 @@ interface BrandCardProps {
   };
   simulationsCount?: number;
   className?: string;
+  /** Compact mode for list view */
+  compact?: boolean;
 }
 
 // Memoized engine badges list
@@ -53,7 +55,8 @@ export const BrandCard = memo(function BrandCard({
   brand, 
   visibility, 
   simulationsCount, 
-  className 
+  className,
+  compact = false,
 }: BrandCardProps) {
   const router = useRouter();
   const overallVisibility = visibility?.overall ?? 0;
@@ -73,6 +76,85 @@ export const BrandCard = memo(function BrandCard({
     router.push(`/brands/${brand.id}`);
   };
 
+  // Compact/List view
+  if (compact) {
+    return (
+      <div 
+        className={cn(
+          "group relative overflow-hidden rounded-xl border border-border bg-card px-4 py-3 transition-all duration-200 cursor-pointer",
+          "hover:border-primary/50 hover:bg-muted/50",
+          className
+        )}
+        onClick={handleCardClick}
+        role="button"
+        tabIndex={0}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            router.push(`/brands/${brand.id}`);
+          }
+        }}
+      >
+        <div className="flex items-center gap-4">
+          <BrandFavicon domain={brand.domain} size="sm" />
+          
+          <div className="flex-1 min-w-0">
+            <h3 className="font-semibold truncate group-hover:text-primary transition-colors">
+              {brand.name}
+            </h3>
+            <div className="flex items-center gap-3 text-sm text-muted-foreground">
+              <span className="truncate">{brand.domain}</span>
+              {brand.primary_location && (
+                <span className="hidden sm:inline truncate">{brand.primary_location}</span>
+              )}
+            </div>
+          </div>
+
+          {/* Engine badges - compact */}
+          <div className="hidden md:flex items-center gap-1.5">
+            {visibility?.byEngine && Object.keys(visibility.byEngine).length > 0 && (
+              <>
+                {(Object.entries(visibility.byEngine) as [SupportedEngine, number][])
+                  .filter(([, v]) => v !== undefined)
+                  .slice(0, 4)
+                  .map(([engine, vis]) => (
+                    <EngineBadge 
+                      key={engine} 
+                      engine={engine} 
+                      visibility={vis}
+                      size="xs"
+                    />
+                  ))}
+              </>
+            )}
+          </div>
+
+          <div className="flex items-center gap-4">
+            {simulationsCount !== undefined && (
+              <span className="hidden sm:flex items-center gap-1.5 text-sm text-muted-foreground">
+                <BarChart3 className="w-4 h-4" />
+                <span className="tabular-nums">{simulationsCount}</span>
+              </span>
+            )}
+            
+            <div className="flex items-center gap-2">
+              <span className={cn(
+                "text-lg font-bold tabular-nums",
+                overallVisibility >= 70 ? "text-green-500" :
+                overallVisibility >= 40 ? "text-yellow-500" :
+                overallVisibility > 0 ? "text-orange-500" : "text-muted-foreground"
+              )}>
+                {overallVisibility}%
+              </span>
+              <ArrowRight className="w-4 h-4 text-muted-foreground group-hover:text-primary group-hover:translate-x-0.5 transition-all" />
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Default grid view
   return (
     <div 
       className={cn(

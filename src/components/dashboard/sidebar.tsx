@@ -16,7 +16,6 @@ import {
   KeyRound,
   BookOpen,
   TrendingUp,
-  Bot,
   Search,
   LucideIcon,
 } from "lucide-react";
@@ -58,12 +57,6 @@ const navigation: NavItem[] = [
     href: "/track-performance",
     icon: TrendingUp,
     description: "Visibility & rank",
-  },
-  {
-    name: "AI Crawler",
-    href: "/ai-crawler",
-    icon: Bot,
-    description: "Bot tracking & indexing",
   },
   {
     name: "Billing",

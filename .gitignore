@@ -39,6 +39,17 @@ yarn-error.log*
 # Cursor
 .cursor/
 
+# local runtime data
+.browser-profiles/
+rpa/*.log
+rpa/venv/
+rpa/rpa_log.txt
+rpa/screenshots/
+
+# python cache
+**/__pycache__/
+*.pyc
+
 # typescript
 *.tsbuildinfo
 next-env.d.ts

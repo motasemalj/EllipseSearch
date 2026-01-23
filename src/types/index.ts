@@ -355,6 +355,15 @@ export interface SelectionSignals {
   grounding_metadata?: GroundingMetadata;
   // NEW: Tiered recommendations with platform-specific strategies
   tiered_recommendations?: TieredRecommendation[];
+  // RPA-specific fields
+  analysis_partial?: boolean; // True if analysis was limited due to short response
+  response_length?: number; // Length of extracted response for debugging
+  rpa_extraction_stats?: {
+    original_html_length: number;
+    original_text_length: number;
+    processed_html_length: number;
+    processed_text_length: number;
+  };
 }
 
 // ===========================================
@@ -707,6 +716,74 @@ export interface RunAnalysisInput {
   region?: SupportedRegion;
   /** Enable Hallucination Watchdog (Pro+ feature) */
   enable_hallucination_watchdog?: boolean;
+  /** Simulation mode: 'api' (fast), 'browser' (real-world), or 'hybrid' (both) */
+  simulation_mode?: SimulationMode;
+  /** Use authenticated sessions for browser mode */
+  use_authenticated_sessions?: boolean;
+}
+
+// ===========================================
+// Simulation Mode Types (API vs Browser)
+// ===========================================
+
+/**
+ * Simulation mode determines how AI responses are captured:
+ * - 'api': Uses official APIs (fast, stable, cost-effective)
+ * - 'browser': Uses headless browser automation (real-world parity)
+ * - 'hybrid': Uses both and merges results (highest fidelity)
+ * - 'rpa': Uses external RPA (headed browser with your real Chrome session)
+ *          Creates simulation record in "awaiting_rpa" status and waits for
+ *          results via /api/analysis/rpa-ingest webhook
+ */
+export type SimulationMode = 'api' | 'browser' | 'hybrid' | 'rpa';
+
+/**
+ * Browser capture data - UI elements not available via API
+ */
+export interface BrowserCaptureData {
+  // Citation details
+  citation_count: number;
+  citations: Array<{
+    index: number;
+    url: string;
+    title: string;
+    is_inline: boolean;
+    citation_style: 'numbered' | 'linked' | 'footnote' | 'superscript';
+  }>;
+  
+  // Source cards (larger featured sources)
+  source_card_count: number;
+  source_cards: Array<{
+    title: string;
+    url: string;
+    domain: string;
+    card_type: 'featured' | 'news' | 'video' | 'social' | 'review';
+  }>;
+  
+  // Search chips and follow-ups
+  search_chip_count: number;
+  search_chips: Array<{
+    text: string;
+    type: 'related_query' | 'people_also_ask' | 'follow_up' | 'filter';
+  }>;
+  
+  // Knowledge panel (if present)
+  has_knowledge_panel: boolean;
+  knowledge_panel?: {
+    entity_name: string;
+    entity_type: string;
+    description: string;
+  };
+  
+  // Product tiles (for shopping queries)
+  product_tile_count: number;
+  
+  // Suggested follow-up questions
+  suggested_followups: string[];
+  
+  // Timing
+  response_time_ms: number;
+  was_logged_in: boolean;
 }
 
 export interface CheckVisibilityInput {
@@ -719,6 +796,10 @@ export interface CheckVisibilityInput {
   region?: SupportedRegion;
   /** Enable Hallucination Watchdog (Pro+ feature) */
   enable_hallucination_watchdog?: boolean;
+  /** Simulation mode: 'api' (fast), 'browser' (real-world), or 'hybrid' (both) */
+  simulation_mode?: SimulationMode;
+  /** Use authenticated sessions for browser mode */
+  use_authenticated_sessions?: boolean;
   // Alias for backwards compatibility
   keyword_id?: string;
 }

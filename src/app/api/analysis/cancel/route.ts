@@ -49,8 +49,8 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Check if batch can be cancelled (only queued or processing)
-    if (!["queued", "processing"].includes(batch.status)) {
+    // Check if batch can be cancelled (queued, processing, or awaiting_rpa)
+    if (!["queued", "processing", "awaiting_rpa"].includes(batch.status)) {
       return NextResponse.json(
         { error: `Cannot cancel batch with status: ${batch.status}` },
         { status: 400 }
@@ -67,6 +67,16 @@ export async function POST(request: NextRequest) {
         error_message: "Cancelled by user"
       })
       .eq("id", batch_id);
+    
+    // Also cancel any pending/awaiting_rpa simulations in this batch
+    await supabase
+      .from("simulations")
+      .update({
+        status: "failed",
+        error_message: "Cancelled by user"
+      })
+      .eq("analysis_batch_id", batch_id)
+      .in("status", ["pending", "processing", "awaiting_rpa"]);
 
     if (updateError) {
       return NextResponse.json(

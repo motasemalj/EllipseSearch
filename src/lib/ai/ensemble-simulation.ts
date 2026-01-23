@@ -25,6 +25,9 @@ import {
 import { 
   ENSEMBLE_RUN_COUNT, 
   BRAND_CONFIDENCE_THRESHOLDS,
+  DEFAULT_BROWSER_SIMULATION_MODE,
+  BROWSER_MODE_ENABLED,
+  type BrowserSimulationMode,
 } from "@/lib/ai/openai-config";
 import type {
   SupportedEngine,
@@ -152,6 +155,49 @@ export interface RunEnsembleInput {
   
   // Override default run count
   run_count?: number;
+  
+  // Simulation mode: api (default), browser (Playwright), or hybrid
+  simulation_mode?: BrowserSimulationMode;
+}
+
+/**
+ * Run a single simulation using API mode
+ * 
+ * NOTE: Browser/BrowserPool mode is DEPRECATED. 
+ * For real browser automation, use RPA mode which runs via the external Python worker.
+ * RPA simulations are handled separately (awaiting_rpa status) and don't go through this function.
+ */
+async function runSimulationWithMode(
+  input: {
+    engine: SupportedEngine;
+    keyword: string;
+    language: SupportedLanguage;
+    region: SupportedRegion;
+    brand_domain: string;
+    simulation_mode: BrowserSimulationMode;
+  }
+): Promise<SimulationRawResult> {
+  const { engine, keyword, language, region, brand_domain, simulation_mode } = input;
+  
+  // RPA mode should never reach here - it's handled separately
+  if (simulation_mode === 'rpa') {
+    throw new Error('[Ensemble] RPA mode should not reach runSimulationWithMode - check analysis flow');
+  }
+  
+  // Browser/hybrid modes are DEPRECATED - log warning and use API
+  if (simulation_mode === 'browser' || simulation_mode === 'hybrid') {
+    console.warn(`[Ensemble] ⚠️ ${simulation_mode} mode is deprecated. Use RPA for real browser automation.`);
+    console.warn(`[Ensemble] Falling back to API mode.`);
+  }
+  
+  // Always use API mode (browser/BrowserPool is deprecated)
+  return runSimulation({
+    engine,
+    keyword,
+    language,
+    brand_domain,
+    region,
+  });
 }
 
 /**
@@ -171,9 +217,16 @@ export async function runEnsembleSimulation(
     brand_domain,
     target_brand,
     run_count = ENSEMBLE_RUN_COUNT,
+    simulation_mode = DEFAULT_BROWSER_SIMULATION_MODE,
   } = input;
   
-  console.log(`[Ensemble] Starting ${run_count} runs for "${keyword}" on ${engine} (region: ${region})`);
+  // Force API mode - browser/BrowserPool is deprecated, RPA is handled separately
+  const effectiveMode = (simulation_mode === 'browser' || simulation_mode === 'hybrid') 
+    ? 'api' 
+    : simulation_mode;
+  
+  const modeLabel = effectiveMode === 'api' ? 'API' : effectiveMode === 'rpa' ? 'RPA' : effectiveMode;
+  console.log(`[Ensemble] Starting ${run_count} runs for "${keyword}" on ${engine} (region: ${region}, mode: ${modeLabel})`);
   
   const runResults: EnsembleSimulationResult["run_results"] = [];
   const allBrandExtractions: BrandExtractionResult[] = [];
@@ -183,16 +236,17 @@ export async function runEnsembleSimulation(
   // Run simulations sequentially to avoid rate limits
   // (Could be parallelized with careful rate limiting)
   for (let i = 0; i < run_count; i++) {
-    console.log(`[Ensemble] Run ${i + 1}/${run_count}...`);
+    console.log(`[Ensemble] Run ${i + 1}/${run_count} (${modeLabel})...`);
     
     try {
-      // 1. Run simulation
-      const simResult = await runSimulation({
+      // 1. Run simulation using API mode (browser/BrowserPool deprecated)
+      const simResult = await runSimulationWithMode({
         engine,
         keyword,
         language,
         brand_domain,
         region,
+        simulation_mode: effectiveMode,
       });
       
       // 2. Collect sources (deduplicated)
@@ -580,15 +634,29 @@ export async function runSingleSimulationWithExtraction(
     evidence: string[];
   };
 }> {
-  const { engine, keyword, language, region = "global", brand_domain, target_brand } = input;
+  const { 
+    engine, 
+    keyword, 
+    language, 
+    region = "global", 
+    brand_domain, 
+    target_brand,
+    simulation_mode = 'api', // Default to API, browser/BrowserPool is deprecated
+  } = input;
   
-  // Run simulation
-  const simulation = await runSimulation({
+  // Force API mode - browser/BrowserPool is deprecated
+  const effectiveMode = (simulation_mode === 'browser' || simulation_mode === 'hybrid') 
+    ? 'api' 
+    : simulation_mode;
+  
+  // Run simulation using API mode
+  const simulation = await runSimulationWithMode({
     engine,
     keyword,
     language,
     brand_domain,
     region,
+    simulation_mode: effectiveMode,
   });
   
   // Extract brands

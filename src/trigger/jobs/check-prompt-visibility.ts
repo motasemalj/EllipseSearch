@@ -38,7 +38,11 @@ import {
 } from "@/lib/ai/hallucination-detector";
 import { analyzeSentiment } from "@/lib/ai/sentiment-analyzer";
 import { generateSchemaFix } from "@/lib/ai/schema-generator";
-import { ENSEMBLE_RUN_COUNT } from "@/lib/ai/openai-config";
+import { 
+  ENSEMBLE_RUN_COUNT, 
+  DEFAULT_BROWSER_SIMULATION_MODE,
+  type BrowserSimulationMode,
+} from "@/lib/ai/openai-config";
 import type { 
   CheckVisibilityInput, 
   SupportedEngine, 
@@ -72,8 +76,23 @@ export const checkPromptVisibility = task({
   run: async (payload: CheckVisibilityInput) => {
     // Support both prompt_id (new) and keyword_id (legacy) for backwards compatibility
     const prompt_id = payload.prompt_id || payload.keyword_id;
-    const { brand_id, analysis_batch_id, engine, language, region = "global", enable_hallucination_watchdog } = payload;
+    const { 
+      brand_id, 
+      analysis_batch_id, 
+      engine, 
+      language, 
+      region = "global", 
+      enable_hallucination_watchdog,
+      simulation_mode = DEFAULT_BROWSER_SIMULATION_MODE,
+    } = payload;
     const supabase = getSupabase();
+    
+    // Log simulation mode for visibility
+    const modeLabel = simulation_mode === 'api' ? 'API' 
+      : simulation_mode === 'browser' ? 'Browser (Playwright)' 
+      : simulation_mode === 'rpa' ? 'RPA (External)' 
+      : 'Hybrid';
+    console.log(`[Visibility] Mode: ${modeLabel}`);
 
     console.log(`Running simulation: ${engine} for prompt ${prompt_id}`);
 
@@ -196,14 +215,48 @@ export const checkPromptVisibility = task({
       }
       simulation = { data: newSim, error: null, count: null, status: 200, statusText: "OK" };
     } else {
-      // Update to processing
+      // Update to processing (or awaiting_rpa for RPA mode)
       await supabase
         .from("simulations")
-        .update({ status: "processing" })
+        .update({ status: simulation_mode === 'rpa' ? "awaiting_rpa" : "processing" })
         .eq("id", simulation.data.id);
     }
 
     const simulationId = simulation.data.id;
+
+    // ===========================================
+    // RPA MODE: Create record and exit early
+    // ===========================================
+    // When using RPA mode, we don't run any automation here.
+    // The external Python RPA script will:
+    // 1. Run the prompt in a real headed Chrome browser
+    // 2. Send results to /api/analysis/rpa-ingest
+    // 3. That endpoint stores results and runs analysis
+    if (simulation_mode === 'rpa') {
+      console.log(`[RPA Mode] Simulation ${simulationId} created with status 'awaiting_rpa'`);
+      console.log(`[RPA Mode] Run the Python RPA script to complete this simulation:`);
+      console.log(`  cd rpa && python main.py --csv prompts.csv --engine ${engine}`);
+      
+      // Update batch progress (we count RPA as "submitted" not "completed")
+      // The webhook will handle final completion
+      
+      return {
+        prompt_id,
+        keyword_id: prompt_id,
+        engine,
+        is_visible: false,
+        presence_level: "likely_absent" as BrandPresenceLevel,
+        visibility_frequency: 0,
+        visibility_confidence: "low" as const,
+        visibility_statement: "Awaiting RPA automation",
+        ensemble_enabled: false,
+        ensemble_run_count: 0,
+        sentiment: "neutral",
+        recommendation: "Run the external RPA script to complete this simulation",
+        tiered_recommendations_count: 0,
+        status: "awaiting_rpa",
+      };
+    }
 
     try {
       // 6. Run the AI simulation with ENSEMBLE approach for high-recall brand detection
@@ -228,7 +281,7 @@ export const checkPromptVisibility = task({
       
       if (useEnsemble) {
         // ENSEMBLE MODE: Multiple runs aggregated for accuracy
-        console.log(`[Ensemble] Running ${ENSEMBLE_RUN_COUNT} simulations for high-recall brand detection...`);
+        console.log(`[Ensemble] Running ${ENSEMBLE_RUN_COUNT} simulations for high-recall brand detection (mode: ${modeLabel})...`);
         
         const ensembleResult = await runEnsembleSimulation({
           engine: engine as SupportedEngine,
@@ -238,6 +291,7 @@ export const checkPromptVisibility = task({
           brand_domain: brand.domain,
           target_brand: targetBrand,
           run_count: ENSEMBLE_RUN_COUNT,
+          simulation_mode: simulation_mode as BrowserSimulationMode,
         });
         
         // Use representative answer for display
@@ -302,6 +356,7 @@ export const checkPromptVisibility = task({
           region,
           brand_domain: brand.domain,
           target_brand: targetBrand,
+          simulation_mode: simulation_mode as BrowserSimulationMode,
         });
         
         simulationResult = singleResult.simulation;
@@ -335,6 +390,7 @@ export const checkPromptVisibility = task({
       // 8. Run full selection signal analysis
       const selectionSignals = await analyzeSelectionSignals({
         answer_html: simulationResult.answer_html,
+        answer_text: simulationResult.answer_text,
         search_context: simulationResult.search_context || null,
         brand_domain: brand.domain,
         brand_aliases: brand.brand_aliases || [],
@@ -514,7 +570,7 @@ export const checkPromptVisibility = task({
         crawl_analysis?: CrawlAnalysis;
       } | null;
       
-      const crawlAnalysis = groundTruthSummary?.crawl_analysis;
+      let crawlAnalysis = groundTruthSummary?.crawl_analysis;
       
       if (crawlAnalysis) {
         console.log(`📊 Using crawl analysis (${crawlAnalysis.summary.total_pages_analyzed} pages):`);
@@ -522,7 +578,16 @@ export const checkPromptVisibility = task({
         console.log(`  🟠 High: ${crawlAnalysis.summary.high_priority_issues.length}`);
         console.log(`  🟡 Medium: ${crawlAnalysis.summary.medium_priority_issues.length}`);
       } else {
-        console.log(`⚠️ No crawl analysis available - only generic suggestions will be generated`);
+        console.log(`⚠️ No crawl analysis available - attempting auto-crawl...`);
+        
+        // AUTO-CRAWL: Trigger website crawl if no crawl data exists
+        crawlAnalysis = await triggerAutoCrawlIfNeeded(supabase, brand_id, brand);
+        
+        if (crawlAnalysis) {
+          console.log(`✓ Auto-crawl completed! Using fresh crawl data.`);
+        } else {
+          console.log(`⚠️ Auto-crawl not available - only generic suggestions will be generated`);
+        }
       }
 
       // Enhance selection signals with tiered recommendations
@@ -670,3 +735,123 @@ export const checkPromptVisibility = task({
     }
   },
 });
+
+// ===========================================
+// AUTO-CRAWL HELPER
+// ===========================================
+
+/**
+ * Trigger website crawl if no crawl data exists.
+ * Uses a lightweight "quick crawl" approach (10 pages) for fast actionable recommendations.
+ * 
+ * Returns crawl analysis if successful, null otherwise.
+ */
+async function triggerAutoCrawlIfNeeded(
+  supabase: ReturnType<typeof getSupabase>,
+  brandId: string,
+  brand: { name: string; domain: string }
+): Promise<CrawlAnalysis | null> {
+  try {
+    // Check if there's already a completed crawl
+    const { data: existingCrawl } = await supabase
+      .from("crawl_jobs")
+      .select("id, status, completed_at")
+      .eq("brand_id", brandId)
+      .eq("status", "completed")
+      .order("completed_at", { ascending: false })
+      .limit(1)
+      .single();
+    
+    if (existingCrawl) {
+      console.log(`   ℹ️ Found existing completed crawl from ${existingCrawl.completed_at}`);
+      
+      // Re-fetch brand to get crawl analysis (it might have been updated since we fetched)
+      const { data: updatedBrand } = await supabase
+        .from("brands")
+        .select("ground_truth_summary")
+        .eq("id", brandId)
+        .single();
+      
+      const summary = updatedBrand?.ground_truth_summary as { crawl_analysis?: CrawlAnalysis } | null;
+      return summary?.crawl_analysis || null;
+    }
+    
+    // Check if there's a crawl in progress
+    const { data: inProgressCrawl } = await supabase
+      .from("crawl_jobs")
+      .select("id, status")
+      .eq("brand_id", brandId)
+      .in("status", ["pending", "crawling"])
+      .single();
+    
+    if (inProgressCrawl) {
+      console.log(`   ⏳ Crawl already in progress (${inProgressCrawl.status})`);
+      return null;
+    }
+    
+    // Trigger a quick crawl (10 pages, depth 2 for speed)
+    console.log(`   🕷️ Triggering auto-crawl for ${brand.domain}...`);
+    
+    // Construct start URL
+    let startUrl = brand.domain;
+    if (!startUrl.startsWith("http://") && !startUrl.startsWith("https://")) {
+      startUrl = `https://${startUrl}`;
+    }
+    
+    // Create crawl job record
+    const { data: crawlJob, error: createError } = await supabase
+      .from("crawl_jobs")
+      .insert({
+        brand_id: brandId,
+        status: "pending",
+        start_url: startUrl,
+        max_pages: 10, // Quick crawl - just enough for actionable recommendations
+        max_depth: 2,
+        include_paths: [],
+        exclude_paths: [],
+      })
+      .select()
+      .single();
+    
+    if (createError || !crawlJob) {
+      console.error(`   ✗ Failed to create crawl job:`, createError);
+      return null;
+    }
+    
+    // Import and trigger the crawl task
+    const { tasks } = await import("@trigger.dev/sdk/v3");
+    
+    try {
+      await tasks.trigger("crawl-brand-website", {
+        brand_id: brandId,
+        crawl_job_id: crawlJob.id,
+        start_url: startUrl,
+        max_pages: 10,
+        max_depth: 2,
+        include_paths: [],
+        exclude_paths: [],
+      });
+      
+      console.log(`   ✓ Auto-crawl triggered (job: ${crawlJob.id})`);
+      console.log(`   ℹ️ Crawl will complete in background. Re-run analysis for actionable recommendations.`);
+      
+    } catch (triggerError) {
+      console.error(`   ✗ Failed to trigger crawl:`, triggerError);
+      
+      // Mark job as failed
+      await supabase
+        .from("crawl_jobs")
+        .update({ 
+          status: "failed", 
+          error_message: `Auto-crawl trigger failed: ${triggerError instanceof Error ? triggerError.message : 'Unknown error'}` 
+        })
+        .eq("id", crawlJob.id);
+    }
+    
+    return null; // Crawl is async, results won't be available immediately
+    
+  } catch (error) {
+    console.error(`   ✗ Auto-crawl error:`, error);
+    return null;
+  }
+}

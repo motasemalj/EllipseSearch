@@ -43,12 +43,13 @@ BEGIN
   RETURNING completed_simulations, total_simulations INTO current_completed, total;
   
   -- Auto-complete batch if all simulations are done
+  -- Support both 'processing' and 'awaiting_rpa' statuses for RPA mode
   IF current_completed >= total THEN
     UPDATE analysis_batches
     SET status = 'completed',
         completed_at = NOW(),
         updated_at = NOW()
-    WHERE id = batch_id AND status = 'processing';
+    WHERE id = batch_id AND status IN ('processing', 'awaiting_rpa');
   END IF;
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;

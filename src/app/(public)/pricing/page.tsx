@@ -1,28 +1,27 @@
 import Link from "next/link";
+import { headers } from "next/headers";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Check, Sparkles, ShieldAlert, Crown, X } from "lucide-react";
+import { Check, Sparkles } from "lucide-react";
 import { TIER_LIMITS } from "@/types";
+import { DirhamSymbol } from "@/components/ui/dirham-symbol";
+import { formatCurrencyAmount, getCurrencyFromHeaders, getPricingTiers } from "@/lib/pricing";
 
 const plans = [
   {
     id: "starter",
     name: "Starter",
     description: "For small agencies getting started with AI visibility",
-    price: 99,
-    currency: "USD",
     period: "month",
     popular: false,
-    hasWatchdog: false,
     features: [
       `${TIER_LIMITS.starter.monthly_credits.toLocaleString()} credits/month`,
       `Up to ${TIER_LIMITS.starter.max_brands} brands`,
-      `${TIER_LIMITS.starter.max_prompts_per_brand} prompts per brand`,
+      `${TIER_LIMITS.starter.max_keywords_per_brand} keywords per brand`,
       "All 4 AI engines",
       "English + Arabic support",
       "Selection signal analysis",
-      "Website crawler",
       "Email support",
     ],
     cta: "Start with Starter",
@@ -31,19 +30,15 @@ const plans = [
     id: "pro",
     name: "Pro",
     description: "For growing agencies with multiple clients",
-    price: 299,
-    currency: "USD",
     period: "month",
     popular: true,
-    hasWatchdog: true,
     features: [
       `${TIER_LIMITS.pro.monthly_credits.toLocaleString()} credits/month`,
       `Up to ${TIER_LIMITS.pro.max_brands} brands`,
-      `${TIER_LIMITS.pro.max_prompts_per_brand} prompts per brand`,
+      `${TIER_LIMITS.pro.max_keywords_per_brand} keywords per brand`,
       "All 4 AI engines",
       "English + Arabic support",
       "Selection signal analysis",
-      "Website crawler",
       "Gap analysis reports",
       "Priority support",
       "API access",
@@ -54,25 +49,21 @@ const plans = [
     id: "agency",
     name: "Agency",
     description: "For established agencies with enterprise needs",
-    price: 799,
-    currency: "USD",
     period: "month",
     popular: false,
-    hasWatchdog: true,
     features: [
       `${TIER_LIMITS.agency.monthly_credits.toLocaleString()} credits/month`,
       `Up to ${TIER_LIMITS.agency.max_brands} brands`,
-      `${TIER_LIMITS.agency.max_prompts_per_brand} prompts per brand`,
+      `${TIER_LIMITS.agency.max_keywords_per_brand} keywords per brand`,
       "All 4 AI engines",
       "English + Arabic support",
       "Selection signal analysis",
-      "Website crawler",
       "White-label reports",
       "Dedicated account manager",
       "Custom integrations",
       "SLA guarantee",
     ],
-    cta: "Start with Agency",
+    cta: "Contact Sales",
   },
 ];
 
@@ -80,12 +71,7 @@ const faqs = [
   {
     question: "What is a credit?",
     answer:
-      "Each credit represents one simulation—querying one AI engine with one prompt. For example, running 10 prompts across all 4 engines uses 40 credits.",
-  },
-  {
-    question: "What is Hallucination Watchdog?",
-    answer:
-      "Hallucination Watchdog is our Pro feature that detects when AI engines lie about your brand. We crawl your website to build a \"Ground Truth\" database, then compare AI responses against it to catch pricing errors, feature mismatches, and availability issues before your customers do.",
+      "Each credit represents one simulation—querying one AI engine with one keyword. For example, running 10 keywords across all 4 engines uses 40 credits.",
   },
   {
     question: "Can I upgrade or downgrade my plan?",
@@ -115,6 +101,19 @@ const faqs = [
 ];
 
 export default function PricingPage() {
+  const currency = getCurrencyFromHeaders(headers());
+  const pricingTiers = getPricingTiers(currency);
+
+  const plansWithPricing = plans.map((plan) => {
+    const pricing = pricingTiers.find((tier) => tier.id === plan.id);
+    return {
+      ...plan,
+      price: pricing?.price ?? null,
+      currency: pricing?.currency ?? "USD",
+      isCustom: pricing?.isCustom ?? false,
+    };
+  });
+
   return (
     <div className="py-20">
       {/* Header */}
@@ -133,7 +132,7 @@ export default function PricingPage() {
         {/* Pricing Cards */}
         <div className="max-w-6xl mx-auto mb-20">
           <div className="grid md:grid-cols-3 gap-8">
-            {plans.map((plan) => (
+            {plansWithPricing.map((plan) => (
               <Card
                 key={plan.id}
                 className={`relative ${
@@ -161,49 +160,21 @@ export default function PricingPage() {
                 <CardContent>
                   <div className="text-center mb-6">
                     <div className="flex items-baseline justify-center gap-1">
-                      <span className="text-4xl font-bold">${plan.price}</span>
-                      <span className="text-muted-foreground">/{plan.period}</span>
-                    </div>
-                  </div>
-
-                  {/* Hallucination Watchdog Feature - Highlighted */}
-                  <div className={`mb-6 p-4 rounded-xl border-2 ${
-                    plan.hasWatchdog 
-                      ? "border-amber-500/40 bg-gradient-to-br from-amber-500/10 to-orange-500/5" 
-                      : "border-dashed border-muted-foreground/20 bg-muted/30"
-                  }`}>
-                    <div className="flex items-center gap-3">
-                      <div className={`p-2 rounded-lg ${plan.hasWatchdog ? "bg-amber-500/20" : "bg-muted"}`}>
-                        <ShieldAlert className={`h-5 w-5 ${plan.hasWatchdog ? "text-amber-500" : "text-muted-foreground"}`} />
-                      </div>
-                      <div className="flex-1">
-                        <div className="flex items-center gap-2">
-                          <span className={`font-semibold text-sm ${plan.hasWatchdog ? "" : "text-muted-foreground"}`}>
-                            Hallucination Watchdog
+                      {plan.isCustom ? (
+                        <span className="text-4xl font-bold">Custom</span>
+                      ) : (
+                        <>
+                          <span className="text-4xl font-bold flex items-center gap-1">
+                            {plan.currency === "AED" ? (
+                              <DirhamSymbol size="lg" />
+                            ) : (
+                              <span>{plan.currency === "SAR" ? "SAR" : "$"}</span>
+                            )}
+                            {formatCurrencyAmount(plan.price ?? 0)}
                           </span>
-                          {plan.hasWatchdog && (
-                            <Badge className="bg-gradient-to-r from-amber-500 to-orange-500 text-white text-xs py-0">
-                              <Crown className="w-3 h-3 mr-1" />
-                              PRO
-                            </Badge>
-                          )}
-                        </div>
-                        <p className="text-xs text-muted-foreground mt-0.5">
-                          {plan.hasWatchdog 
-                            ? "Detect when AI lies about your brand" 
-                            : "Upgrade to access this feature"
-                          }
-                        </p>
-                      </div>
-                      <div className={`h-6 w-6 rounded-full flex items-center justify-center ${
-                        plan.hasWatchdog ? "bg-amber-500/20" : "bg-muted"
-                      }`}>
-                        {plan.hasWatchdog ? (
-                          <Check className="h-4 w-4 text-amber-500" />
-                        ) : (
-                          <X className="h-4 w-4 text-muted-foreground" />
-                        )}
-                      </div>
+                          <span className="text-muted-foreground">/{plan.period}</span>
+                        </>
+                      )}
                     </div>
                   </div>
 
@@ -223,7 +194,7 @@ export default function PricingPage() {
                     variant={plan.popular ? "default" : "outline"}
                     asChild
                   >
-                    <Link href="/signup">{plan.cta}</Link>
+                    <Link href={plan.isCustom ? "/support" : "/signup"}>{plan.cta}</Link>
                   </Button>
                 </CardContent>
               </Card>

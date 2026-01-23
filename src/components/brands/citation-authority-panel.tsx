@@ -21,6 +21,8 @@ import type { CitationAuthority, StandardizedSource } from "@/types";
 interface CitationAuthorityPanelProps {
   sources: StandardizedSource[] | CitationAuthority[];
   brandDomain: string;
+  brandName?: string;
+  isBrandVisible?: boolean; // Whether brand was mentioned in the AI response
   maxDisplay?: number;
 }
 
@@ -37,10 +39,24 @@ type NormalizedSource = {
 
 function normalizeSource(s: StandardizedSource | CitationAuthority, brandDomain: string): NormalizedSource {
   const tier = 'tier' in s ? s.tier : ('authority_tier' in s ? s.authority_tier : undefined);
+  
+  // Enhanced brand domain matching
+  const sourceDomain = (s.domain || '').toLowerCase().replace(/^www\./, '');
+  const cleanBrandDomain = brandDomain.toLowerCase().replace(/^www\./, '');
+  
+  // Extract core brand name from domain (e.g., "damac" from "damac.com" or "damac.ae")
+  const brandCore = cleanBrandDomain.split('.')[0];
+  const sourceCore = sourceDomain.split('.')[0];
+  
   const isBrandMatch = 
     ('is_brand_match' in s && s.is_brand_match) || 
     ('is_brand_domain' in s && s.is_brand_domain) ||
-    s.domain?.toLowerCase().includes(brandDomain.toLowerCase());
+    sourceDomain === cleanBrandDomain ||  // Exact match
+    sourceDomain.includes(cleanBrandDomain) ||  // Source contains brand
+    cleanBrandDomain.includes(sourceDomain) ||  // Brand contains source
+    sourceCore === brandCore ||  // Core names match
+    (brandCore.length > 3 && sourceDomain.includes(brandCore)) ||  // Core brand name in source
+    (sourceCore.length > 3 && cleanBrandDomain.includes(sourceCore));  // Core source in brand
   
   return {
     url: 'url' in s ? s.url : undefined,
@@ -56,6 +72,8 @@ function normalizeSource(s: StandardizedSource | CitationAuthority, brandDomain:
 export function CitationAuthorityPanel({
   sources,
   brandDomain,
+  brandName,
+  isBrandVisible = false,
   maxDisplay = 8,
 }: CitationAuthorityPanelProps) {
   const [expanded, setExpanded] = useState(false);
@@ -246,15 +264,41 @@ export function CitationAuthorityPanel({
         </div>
       )}
 
-      {/* Recommendation if brand not in top sources */}
+      {/* Contextual recommendation based on visibility and citation status */}
       {brandMatchCount === 0 && (
-        <div className="p-4 border-t border-border bg-amber-500/5">
+        <div className={`p-4 border-t border-border ${isBrandVisible ? 'bg-blue-500/5' : 'bg-amber-500/5'}`}>
           <div className="flex items-start gap-2">
-            <AlertCircle className="w-4 h-4 text-amber-500 mt-0.5 shrink-0" />
-            <p className="text-sm text-amber-600 dark:text-amber-400">
-              <span className="font-medium">Your brand was not cited.</span>{" "}
-              Focus on getting featured in high-authority sources like{" "}
-              {sortedSources.slice(0, 2).map(s => s.domain).join(", ")}.
+            <AlertCircle className={`w-4 h-4 mt-0.5 shrink-0 ${isBrandVisible ? 'text-blue-500' : 'text-amber-500'}`} />
+            <p className={`text-sm ${isBrandVisible ? 'text-blue-600 dark:text-blue-400' : 'text-amber-600 dark:text-amber-400'}`}>
+              {isBrandVisible ? (
+                <>
+                  <span className="font-medium">{brandName || 'Your brand'} was mentioned but not directly cited.</span>{" "}
+                  The AI referenced your brand in its response, but didn&apos;t link to your website as a source.
+                  {sortedSources.length > 0 && (
+                    <> Target getting cited alongside {sortedSources.slice(0, 2).map(s => s.domain).join(" and ")}.</>
+                  )}
+                </>
+              ) : (
+                <>
+                  <span className="font-medium">Your brand was not cited in sources.</span>{" "}
+                  {sortedSources.length > 0 && (
+                    <>Focus on getting featured in high-authority sources like {sortedSources.slice(0, 2).map(s => s.domain).join(", ")}.</>
+                  )}
+                </>
+              )}
+            </p>
+          </div>
+        </div>
+      )}
+      
+      {/* Positive message if brand IS cited */}
+      {brandMatchCount > 0 && (
+        <div className="p-4 border-t border-border bg-emerald-500/5">
+          <div className="flex items-start gap-2">
+            <Award className="w-4 h-4 text-emerald-500 mt-0.5 shrink-0" />
+            <p className="text-sm text-emerald-600 dark:text-emerald-400">
+              <span className="font-medium">{brandName || 'Your brand'} was cited {brandMatchCount} time{brandMatchCount > 1 ? 's' : ''}!</span>{" "}
+              The AI is referencing your website as a source.
             </p>
           </div>
         </div>

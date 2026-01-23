@@ -61,6 +61,43 @@ const DEFAULT_CRAWL_OPTIONS: CrawlOptions = {
   timeout: 300, // 5 minutes
 };
 
+const TRANSIENT_FIRECRAWL_ERRORS = [
+  "ETIMEDOUT",
+  "ECONNRESET",
+  "ECONNREFUSED",
+  "ENOTFOUND",
+  "EAI_AGAIN",
+];
+
+function isTransientFirecrawlError(message: string): boolean {
+  return TRANSIENT_FIRECRAWL_ERRORS.some((code) => message.includes(code));
+}
+
+async function withRetry<T>(
+  fn: () => Promise<T>,
+  options?: { maxAttempts?: number; baseDelayMs?: number }
+): Promise<T> {
+  const maxAttempts = options?.maxAttempts ?? 3;
+  const baseDelayMs = options?.baseDelayMs ?? 500;
+  let lastError: unknown;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      return await fn();
+    } catch (error) {
+      lastError = error;
+      const message = error instanceof Error ? error.message : String(error);
+      if (!isTransientFirecrawlError(message) || attempt >= maxAttempts) {
+        throw error;
+      }
+      const delay = baseDelayMs * attempt;
+      await new Promise((resolve) => setTimeout(resolve, delay));
+    }
+  }
+
+  throw lastError;
+}
+
 /**
  * Scrape a single page - fast, synchronous
  */
@@ -116,15 +153,19 @@ export async function startCrawl(
     console.log(`[Firecrawl] Starting crawl for: ${url} with options:`, mergedOptions);
 
     // Start async crawl - returns immediately
-    const response = await firecrawl.asyncCrawlUrl(url, {
-      limit: mergedOptions.maxPages,
-      maxDepth: mergedOptions.maxDepth,
-      includePaths: mergedOptions.includePaths,
-      excludePaths: mergedOptions.excludePaths,
-      scrapeOptions: {
-        formats: mergedOptions.formats,
-      },
-    });
+    const response = await withRetry(
+      () =>
+        firecrawl.asyncCrawlUrl(url, {
+          limit: mergedOptions.maxPages,
+          maxDepth: mergedOptions.maxDepth,
+          includePaths: mergedOptions.includePaths,
+          excludePaths: mergedOptions.excludePaths,
+          scrapeOptions: {
+            formats: mergedOptions.formats,
+          },
+        }),
+      { maxAttempts: 3, baseDelayMs: 800 }
+    );
 
     if (!response.success) {
       return {
@@ -155,7 +196,10 @@ export async function checkCrawlStatus(jobId: string): Promise<CrawlResult> {
   try {
     console.log(`[Firecrawl] Checking status for job: ${jobId}`);
 
-    const response = await firecrawl.checkCrawlStatus(jobId);
+    const response = await withRetry(
+      () => firecrawl.checkCrawlStatus(jobId),
+      { maxAttempts: 3, baseDelayMs: 800 }
+    );
 
     // Check for error response
     if (!('status' in response)) {
@@ -206,13 +250,24 @@ export async function checkCrawlStatus(jobId: string): Promise<CrawlResult> {
     };
   } catch (error) {
     console.error(`[Firecrawl] Check status error:`, error);
+    const message = error instanceof Error ? error.message : String(error);
+    if (isTransientFirecrawlError(message)) {
+      return {
+        success: false,
+        jobId,
+        status: "pending",
+        pages: [],
+        totalPages: 0,
+        errorMessage: message,
+      };
+    }
     return {
       success: false,
       jobId,
       status: "failed",
       pages: [],
       totalPages: 0,
-      errorMessage: error instanceof Error ? error.message : "Unknown error",
+      errorMessage: message,
     };
   }
 }
@@ -226,11 +281,13 @@ export async function waitForCrawl(
   options?: { 
     maxWaitMs?: number; 
     pollIntervalMs?: number;
+    maxPollIntervalMs?: number;
     onProgress?: (status: CrawlResult) => void;
   }
 ): Promise<CrawlResult> {
   const maxWait = options?.maxWaitMs || 300000; // 5 minutes default
-  const pollInterval = options?.pollIntervalMs || 5000; // 5 seconds default
+  let pollInterval = options?.pollIntervalMs || 5000; // 5 seconds default
+  const maxPollInterval = options?.maxPollIntervalMs || 20000; // 20 seconds max
   const startTime = Date.now();
 
   while (Date.now() - startTime < maxWait) {
@@ -240,12 +297,19 @@ export async function waitForCrawl(
       options.onProgress(status);
     }
 
-    if (status.status === "completed" || status.status === "failed") {
+    if (status.status === "completed") {
       return status;
+    }
+    if (status.status === "failed") {
+      const message = status.errorMessage || "";
+      if (!isTransientFirecrawlError(message)) {
+        return status;
+      }
     }
 
     // Wait before next poll
     await new Promise(resolve => setTimeout(resolve, pollInterval));
+    pollInterval = Math.min(maxPollInterval, Math.round(pollInterval * 1.5));
   }
 
   // Timeout

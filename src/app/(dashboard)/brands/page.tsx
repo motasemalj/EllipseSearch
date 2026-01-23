@@ -2,10 +2,10 @@ import { redirect } from "next/navigation";
 import { getCurrentUser, getUserProfile, getCachedBrands, getCachedSimulations } from "@/lib/cache";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
-import { Plus, Search, Filter, Grid } from "lucide-react";
+import { Plus } from "lucide-react";
 import { BrandCard } from "@/components/dashboard/brand-card";
-import { Input } from "@/components/ui/input";
 import { Brand, SupportedEngine } from "@/types";
+import { BrandsFilters } from "./brands-filters";
 
 // Route segment config for caching
 export const revalidate = 60;
@@ -55,6 +55,26 @@ export default async function BrandsPage() {
 
   const { brands, brandVisibility } = await getBrandsData(profile.organization_id);
 
+  // Prepare brands data with visibility
+  const brandsWithVisibility = brands.map((brand) => {
+    const vis = brandVisibility[brand.id];
+    const visibilityData = vis ? {
+      overall: vis.count > 0 ? Math.round((vis.overall / vis.count) * 100) : 0,
+      byEngine: Object.fromEntries(
+        Object.entries(vis.byEngine).map(([eng, stats]) => [
+          eng,
+          stats.total > 0 ? Math.round((stats.visible / stats.total) * 100) : 0
+        ])
+      ) as Partial<Record<SupportedEngine, number>>,
+    } : undefined;
+
+    return {
+      brand: brand as Brand,
+      visibility: visibilityData,
+      simulationsCount: vis?.count || 0,
+    };
+  });
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -73,52 +93,11 @@ export default async function BrandsPage() {
         </Link>
       </div>
 
-      {/* Search and Filters */}
-      <div className="flex flex-col sm:flex-row gap-3">
-        <div className="relative flex-1 max-w-md">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-          <Input
-            placeholder="Search brands..."
-            className="pl-9"
-          />
-        </div>
-        <div className="flex gap-2">
-          <Button variant="outline" size="icon">
-            <Filter className="w-4 h-4" />
-          </Button>
-          <Button variant="outline" size="icon">
-            <Grid className="w-4 h-4" />
-          </Button>
-        </div>
-      </div>
-
-      {/* Brands Grid */}
+      {/* Brands List with Filters */}
       {brands.length === 0 ? (
         <EmptyState />
       ) : (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          {brands.map((brand) => {
-            const vis = brandVisibility[brand.id];
-            const visibilityData = vis ? {
-              overall: vis.count > 0 ? Math.round((vis.overall / vis.count) * 100) : 0,
-              byEngine: Object.fromEntries(
-                Object.entries(vis.byEngine).map(([eng, stats]) => [
-                  eng,
-                  stats.total > 0 ? Math.round((stats.visible / stats.total) * 100) : 0
-                ])
-              ) as Partial<Record<SupportedEngine, number>>,
-            } : undefined;
-
-            return (
-              <BrandCard
-                key={brand.id}
-                brand={brand as Brand}
-                visibility={visibilityData}
-                simulationsCount={vis?.count || 0}
-              />
-            );
-          })}
-        </div>
+        <BrandsFilters brands={brandsWithVisibility} />
       )}
     </div>
   );

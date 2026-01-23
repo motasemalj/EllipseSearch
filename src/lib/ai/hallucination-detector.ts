@@ -126,7 +126,6 @@ Only include fields where you found real data. Use empty arrays if not found.`;
         { role: "system", content: systemPrompt },
         { role: "user", content: userPrompt },
       ],
-      temperature: 0.1,
       response_format: { type: "json_object" },
       max_completion_tokens: 2000,
     });
@@ -238,7 +237,6 @@ SEVERITY GUIDE:
         { role: "system", content: systemPrompt },
         { role: "user", content: userPrompt },
       ],
-      temperature: 0.2,
       response_format: { type: "json_object" },
       max_completion_tokens: 1500,
     });
