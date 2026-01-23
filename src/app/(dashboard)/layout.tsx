@@ -3,6 +3,7 @@ import { getCurrentUser, getUserProfile } from "@/lib/cache";
 import { Sidebar } from "@/components/dashboard/sidebar";
 import { Header } from "@/components/dashboard/header";
 import { Toaster } from "@/components/ui/sonner";
+import { SubscriptionBanner } from "@/components/subscription/subscription-banner";
 
 export default async function DashboardLayout({
   children,
@@ -22,6 +23,9 @@ export default async function DashboardLayout({
 
   return (
     <div className="min-h-screen bg-background">
+      {/* Subscription Banner - shows trial warnings, expired trials, low credits */}
+      <SubscriptionBanner />
+      
       {/* Sidebar */}
       <Sidebar />
 

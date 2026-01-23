@@ -1,16 +1,16 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { createClient } from "@/lib/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Textarea } from "@/components/ui/textarea";
-import { ArrowLeft, Loader2, Globe, MapPin, Building2, Sparkles, Wand2, Tags, Target } from "lucide-react";
+import { ArrowLeft, Loader2, Globe, MapPin, Building2, Sparkles, Wand2, Tags, Target, AlertTriangle, Crown } from "lucide-react";
 import { toast } from "sonner";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 
 interface BrandContext {
   product_description: string;
@@ -22,11 +22,25 @@ interface BrandContext {
   unique_selling_points: string[];
 }
 
+interface SubscriptionStatus {
+  tier: string;
+  isTrialExpired: boolean;
+  trialDaysRemaining: number;
+  limits: {
+    maxBrands: number;
+  };
+  usage: {
+    currentBrands: number;
+  };
+  canCreateBrand: boolean;
+  needsUpgrade: boolean;
+}
+
 export default function NewBrandPage() {
   const router = useRouter();
-  const supabase = createClient();
   const [isLoading, setIsLoading] = useState(false);
   const [isGeneratingContext, setIsGeneratingContext] = useState(false);
+  const [subscriptionStatus, setSubscriptionStatus] = useState<SubscriptionStatus | null>(null);
   const [formData, setFormData] = useState({
     name: "",
     domain: "",
@@ -43,6 +57,22 @@ export default function NewBrandPage() {
     competitors: [],
     unique_selling_points: [],
   });
+
+  // Fetch subscription status
+  useEffect(() => {
+    async function fetchStatus() {
+      try {
+        const res = await fetch("/api/subscription/status");
+        if (res.ok) {
+          const data = await res.json();
+          setSubscriptionStatus(data);
+        }
+      } catch (error) {
+        console.error("Failed to fetch subscription status:", error);
+      }
+    }
+    fetchStatus();
+  }, []);
 
   const handleLanguageToggle = (lang: string) => {
     setFormData(prev => ({
@@ -102,28 +132,6 @@ export default function NewBrandPage() {
     setIsLoading(true);
 
     try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) {
-        router.push("/login");
-        return;
-      }
-
-      const { data: profile } = await supabase
-        .from("profiles")
-        .select("organization_id")
-        .eq("id", user.id)
-        .single();
-
-      if (!profile?.organization_id) {
-        toast.error("No organization found");
-        return;
-      }
-
-      // Clean domain (remove protocol if present)
-      const cleanDomain = formData.domain
-        .replace(/^https?:\/\//, "")
-        .replace(/\/$/, "");
-
       // Combine context into settings
       const settings: Record<string, unknown> = {};
       if (brandContext.product_description) settings.product_description = brandContext.product_description;
@@ -134,23 +142,50 @@ export default function NewBrandPage() {
       if (brandContext.competitors.length > 0) settings.competitors = brandContext.competitors;
       if (brandContext.unique_selling_points.length > 0) settings.unique_selling_points = brandContext.unique_selling_points;
 
-      const { data: brand, error } = await supabase
-        .from("brands")
-        .insert({
-          organization_id: profile.organization_id,
+      // Use API route for server-side validation of tier limits
+      const response = await fetch("/api/brands", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
           name: formData.name.trim(),
-          domain: cleanDomain,
+          domain: formData.domain,
           primary_location: formData.primary_location.trim() || null,
           languages: formData.languages,
           brand_aliases: formData.brand_aliases
             ? formData.brand_aliases.split(",").map(a => a.trim()).filter(Boolean)
             : [],
           settings,
-        })
-        .select()
-        .single();
+        }),
+      });
 
-      if (error) throw error;
+      const data = await response.json();
+
+      if (!response.ok) {
+        // Handle tier limit errors
+        if (data.code === "TRIAL_EXPIRED") {
+          toast.error("Trial Expired", {
+            description: "Your trial has expired. Please upgrade to continue.",
+            action: {
+              label: "Upgrade",
+              onClick: () => router.push("/billing"),
+            },
+          });
+          return;
+        }
+        if (data.code === "BRAND_LIMIT_REACHED") {
+          toast.error("Brand Limit Reached", {
+            description: data.message,
+            action: {
+              label: "Upgrade",
+              onClick: () => router.push("/billing"),
+            },
+          });
+          return;
+        }
+        throw new Error(data.error || "Failed to create brand");
+      }
+
+      const brand = data.brand;
 
       // Auto-trigger website crawl in background (Ground Truth collection)
       try {
@@ -188,6 +223,10 @@ export default function NewBrandPage() {
     }
   };
 
+  // Check if user has reached their brand limit
+  const canCreateBrand = subscriptionStatus?.canCreateBrand ?? true;
+  const reachedLimit = subscriptionStatus !== null && !canCreateBrand;
+
   return (
     <div className="max-w-2xl mx-auto">
       {/* Header */}
@@ -204,6 +243,27 @@ export default function NewBrandPage() {
           </p>
         </div>
       </div>
+
+      {/* Brand Limit Warning */}
+      {reachedLimit && (
+        <Alert variant="destructive" className="mb-6">
+          <AlertTriangle className="h-4 w-4" />
+          <AlertDescription className="flex items-center justify-between">
+            <span>
+              {subscriptionStatus.isTrialExpired
+                ? "Your trial has expired."
+                : `You've reached your ${subscriptionStatus.tier} plan limit of ${subscriptionStatus.limits.maxBrands} brand${subscriptionStatus.limits.maxBrands === 1 ? '' : 's'}.`}
+              {" "}Upgrade to add more brands.
+            </span>
+            <Link href="/billing">
+              <Button size="sm" variant="outline" className="ml-4 gap-1">
+                <Crown className="w-3 h-3" />
+                Upgrade
+              </Button>
+            </Link>
+          </AlertDescription>
+        </Alert>
+      )}
 
       <form onSubmit={handleSubmit} className="space-y-6">
         {/* Basic Info */}
@@ -423,12 +483,14 @@ export default function NewBrandPage() {
               Cancel
             </Button>
           </Link>
-          <Button type="submit" disabled={isLoading} className="gap-2">
+          <Button type="submit" disabled={isLoading || reachedLimit} className="gap-2">
             {isLoading ? (
               <>
                 <Loader2 className="w-4 h-4 animate-spin" />
                 Creating...
               </>
+            ) : reachedLimit ? (
+              "Upgrade Required"
             ) : (
               "Create Brand"
             )}

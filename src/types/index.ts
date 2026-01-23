@@ -213,6 +213,13 @@ export interface Organization {
   settings: OrganizationSettings;
   created_at: string;
   updated_at: string;
+  // Trial tracking fields
+  trial_started_at: string | null;
+  trial_expires_at: string | null;
+  trial_converted: boolean;
+  // Subscription tracking
+  subscription_started_at: string | null;
+  subscription_period_end: string | null;
 }
 
 export interface OrganizationSettings {

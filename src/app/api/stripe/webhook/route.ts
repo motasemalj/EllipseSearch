@@ -107,6 +107,15 @@ async function handleCheckoutComplete(session: Stripe.Checkout.Session) {
 
   const credits = TIER_LIMITS[tier]?.monthly_credits || 0;
 
+  // Mark trial as converted if upgrading from trial
+  const { data: currentOrg } = await supabase
+    .from("organizations")
+    .select("tier")
+    .eq("id", organizationId)
+    .single();
+
+  const wasOnTrial = currentOrg?.tier === 'trial';
+
   await supabase
     .from("organizations")
     .update({
@@ -114,11 +123,14 @@ async function handleCheckoutComplete(session: Stripe.Checkout.Session) {
       stripe_subscription_id: session.subscription as string,
       stripe_subscription_status: "active",
       credits_balance: credits,
+      // Mark trial as converted if they were on trial
+      trial_converted: wasOnTrial ? true : undefined,
+      subscription_started_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     })
     .eq("id", organizationId);
 
-  console.log(`Checkout complete for org ${organizationId}: ${tier} plan`);
+  console.log(`Checkout complete for org ${organizationId}: ${tier} plan${wasOnTrial ? ' (converted from trial)' : ''}`);
 }
 
 async function handleSubscriptionUpdate(subscription: Stripe.Subscription) {
@@ -215,12 +227,17 @@ async function handleInvoicePaid(invoice: Stripe.Invoice) {
 
   const tier = org.tier as BillingTier;
   const credits = TIER_LIMITS[tier]?.monthly_credits || 0;
+  
+  // Calculate subscription period end (1 month from now)
+  const periodEnd = new Date();
+  periodEnd.setMonth(periodEnd.getMonth() + 1);
 
   // Reset credits on renewal
   await supabase
     .from("organizations")
     .update({
       credits_balance: credits,
+      subscription_period_end: periodEnd.toISOString(),
       updated_at: new Date().toISOString(),
     })
     .eq("id", org.id);

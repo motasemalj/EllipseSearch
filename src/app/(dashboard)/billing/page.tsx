@@ -11,11 +11,14 @@ import {
   ArrowRight,
   Sparkles,
   BarChart3,
+  Clock,
+  AlertTriangle,
 } from "lucide-react";
 import { BillingActions } from "@/components/billing/billing-actions";
-import { TIER_LIMITS } from "@/types";
+import { BillingTier, TIER_LIMITS } from "@/types";
 import { DirhamSymbol } from "@/components/ui/dirham-symbol";
 import { formatCurrencyAmount, getCurrencyFromHeaders, getPricingTiers } from "@/lib/pricing";
+import { isTrialExpired, getTrialDaysRemaining } from "@/lib/subscription";
 
 const plans = [
   {
@@ -102,12 +105,20 @@ export default async function BillingPage() {
     credits_balance: number;
     stripe_subscription_status: string | null;
     stripe_customer_id: string | null;
+    trial_started_at: string | null;
+    trial_expires_at: string | null;
+    trial_converted: boolean;
   };
 
   const currentTier = organization?.tier || "free";
   const credits = organization?.credits_balance || 0;
   const subscriptionStatus = organization?.stripe_subscription_status;
   const tierLimits = TIER_LIMITS[currentTier as keyof typeof TIER_LIMITS] || TIER_LIMITS.free;
+  
+  // Trial status
+  const trialExpired = isTrialExpired({ tier: currentTier as BillingTier, trial_expires_at: organization.trial_expires_at });
+  const trialDaysRemaining = getTrialDaysRemaining({ trial_expires_at: organization.trial_expires_at });
+  const isOnTrial = currentTier === 'trial' && !trialExpired;
 
   // Get usage stats
   const { count: brandsCount } = await supabase
@@ -130,16 +141,90 @@ export default async function BillingPage() {
         </p>
       </div>
 
+      {/* Trial Warning Banner */}
+      {isOnTrial && trialDaysRemaining <= 2 && (
+        <div className="rounded-2xl border-2 border-amber-500/50 bg-gradient-to-r from-amber-500/10 to-orange-500/10 p-6">
+          <div className="flex items-center gap-4">
+            <div className="p-3 rounded-full bg-amber-500/20">
+              <Clock className="w-6 h-6 text-amber-500" />
+            </div>
+            <div className="flex-1">
+              <h3 className="font-semibold text-lg">
+                {trialDaysRemaining === 0 
+                  ? "Your trial ends today!" 
+                  : trialDaysRemaining === 1
+                    ? "Only 1 day left in your trial"
+                    : `${trialDaysRemaining} days left in your trial`}
+              </h3>
+              <p className="text-sm text-muted-foreground mt-1">
+                Upgrade now to keep your data and unlock full features. No interruption to your service.
+              </p>
+            </div>
+            <BillingActions 
+              currentTier={currentTier} 
+              targetTier="starter"
+              hasSubscription={!!organization?.stripe_customer_id}
+              buttonOnly
+            />
+          </div>
+        </div>
+      )}
+
+      {/* Trial Expired Banner */}
+      {trialExpired && (
+        <div className="rounded-2xl border-2 border-red-500/50 bg-gradient-to-r from-red-500/10 to-rose-500/10 p-6">
+          <div className="flex items-center gap-4">
+            <div className="p-3 rounded-full bg-red-500/20">
+              <AlertTriangle className="w-6 h-6 text-red-500" />
+            </div>
+            <div className="flex-1">
+              <h3 className="font-semibold text-lg text-red-600 dark:text-red-400">Trial Expired</h3>
+              <p className="text-sm text-muted-foreground mt-1">
+                Your trial has ended. Upgrade now to continue tracking your brand&apos;s AI visibility.
+              </p>
+            </div>
+            <BillingActions 
+              currentTier={currentTier} 
+              targetTier="starter"
+              hasSubscription={!!organization?.stripe_customer_id}
+              buttonOnly
+            />
+          </div>
+        </div>
+      )}
+
       {/* Current Plan Overview */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         {/* Current Plan */}
-        <div className="rounded-2xl border border-primary/30 bg-gradient-to-br from-primary/10 to-transparent p-6">
+        <div className={`rounded-2xl border p-6 ${
+          trialExpired 
+            ? 'border-red-500/30 bg-gradient-to-br from-red-500/10 to-transparent'
+            : isOnTrial 
+              ? 'border-amber-500/30 bg-gradient-to-br from-amber-500/10 to-transparent'
+              : 'border-primary/30 bg-gradient-to-br from-primary/10 to-transparent'
+        }`}>
           <div className="flex items-center gap-2 mb-2">
-            <Sparkles className="w-5 h-5 text-primary" />
+            {isOnTrial ? (
+              <Clock className="w-5 h-5 text-amber-500" />
+            ) : trialExpired ? (
+              <AlertTriangle className="w-5 h-5 text-red-500" />
+            ) : (
+              <Sparkles className="w-5 h-5 text-primary" />
+            )}
             <span className="text-sm text-muted-foreground">Current Plan</span>
           </div>
           <p className="text-2xl font-bold capitalize">{currentTier}</p>
-          {subscriptionStatus && (
+          {isOnTrial && (
+            <span className="inline-block mt-2 px-2.5 py-1 rounded-full text-xs font-medium bg-amber-500/10 text-amber-600 dark:text-amber-400">
+              {trialDaysRemaining} day{trialDaysRemaining !== 1 ? 's' : ''} remaining
+            </span>
+          )}
+          {trialExpired && (
+            <span className="inline-block mt-2 px-2.5 py-1 rounded-full text-xs font-medium bg-red-500/10 text-red-600 dark:text-red-400">
+              Expired
+            </span>
+          )}
+          {subscriptionStatus && !isOnTrial && !trialExpired && (
             <span className={`inline-block mt-2 px-2.5 py-1 rounded-full text-xs font-medium ${
               subscriptionStatus === 'active' 
                 ? 'bg-green-500/10 text-green-500' 
