@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useMemo } from "react";
+import { memo, useMemo, useState, useEffect } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
@@ -18,6 +18,7 @@ import {
   TrendingUp,
   Search,
   LucideIcon,
+  Clock,
 } from "lucide-react";
 
 interface NavItem {
@@ -153,8 +154,66 @@ const ResourceItemComponent = memo(function ResourceItemComponent({
   );
 });
 
-// Memoized upgrade CTA
+// Subscription status hook
+function useSubscriptionStatus() {
+  const [status, setStatus] = useState<{
+    tier: string;
+    isTrialActive: boolean;
+    trialDaysRemaining: number;
+    isPaidSubscription: boolean;
+    creditsBalance: number;
+  } | null>(null);
+
+  useEffect(() => {
+    async function fetchStatus() {
+      try {
+        const res = await fetch("/api/subscription/status");
+        if (res.ok) {
+          const data = await res.json();
+          setStatus(data);
+        }
+      } catch (error) {
+        console.error("Failed to fetch subscription status:", error);
+      }
+    }
+    fetchStatus();
+  }, []);
+
+  return status;
+}
+
+// Memoized upgrade CTA - only shows for free/trial users
 const UpgradeCTA = memo(function UpgradeCTA() {
+  const status = useSubscriptionStatus();
+
+  // Don't show for paid subscribers
+  if (!status || status.isPaidSubscription || ['starter', 'pro', 'agency'].includes(status.tier)) {
+    return null;
+  }
+
+  // Show trial status for trial users
+  if (status.isTrialActive) {
+    return (
+      <div className="p-4 border-t border-border">
+        <div className="rounded-xl bg-gradient-to-br from-amber-500/20 via-amber-500/10 to-transparent p-4 border border-amber-500/20">
+          <div className="flex items-center gap-2 mb-2">
+            <Clock className="w-4 h-4 text-amber-500" />
+            <span className="text-sm font-semibold text-amber-600 dark:text-amber-400">Trial Active</span>
+          </div>
+          <p className="text-xs text-muted-foreground mb-3">
+            {status.trialDaysRemaining} day{status.trialDaysRemaining !== 1 ? 's' : ''} left • {status.creditsBalance} credits
+          </p>
+          <Link href="/billing" prefetch={true}>
+            <button className="w-full py-2 px-3 rounded-lg bg-amber-500 text-white text-sm font-medium hover:bg-amber-600 transition-colors">
+              Upgrade Now
+            </button>
+          </Link>
+        </div>
+      </div>
+    );
+  }
+
+  // Show upgrade CTA for free users
   return (
     <div className="p-4 border-t border-border">
       <div className="rounded-xl bg-gradient-to-br from-primary/20 via-primary/10 to-transparent p-4 border border-primary/20">

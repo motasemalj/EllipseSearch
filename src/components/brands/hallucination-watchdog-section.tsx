@@ -130,8 +130,18 @@ const exampleHallucinations = [
 export function HallucinationWatchdogSection({ data, brandId, userTier }: HallucinationWatchdogSectionProps) {
   const isPro = userTier === "pro" || userTier === "agency";
   
-  // Always show the section - locked state for non-Pro or when not enabled
-  if (!data || !data.enabled || (!isPro && !data?.result)) {
+  // Determine what state to show:
+  // 1. Not Pro and no data/result -> Show upgrade prompt
+  // 2. Pro but detection wasn't enabled -> Show "enable in next analysis"
+  // 3. Pro and detection enabled but no result (no ground truth data) -> Show "need to crawl website"
+  // 4. Pro and detection enabled with result -> Show results
+  
+  const showUpgradePrompt = !isPro && (!data?.result);
+  const wasEnabledButNoResult = isPro && data?.enabled && !data?.result;
+  const wasNotEnabled = isPro && (!data || !data.enabled);
+  
+  // Show locked/upgrade state
+  if (showUpgradePrompt || wasNotEnabled || wasEnabledButNoResult) {
     return (
       <Card className="border-2 border-dashed border-amber-500/30 bg-gradient-to-br from-amber-950/10 via-background to-orange-950/10 overflow-hidden relative" id="watchdog">
         {/* Decorative gradient */}
@@ -151,9 +161,11 @@ export function HallucinationWatchdogSection({ data, brandId, userTier }: Halluc
                 </Badge>
               </div>
               <CardDescription>
-                {!isPro 
+                {showUpgradePrompt 
                   ? "Upgrade to Pro to unlock this feature"
-                  : "Enable in Run Analysis to detect AI lies"
+                  : wasEnabledButNoResult
+                    ? "Website crawl data needed for detection"
+                    : "Enable in Run Analysis to detect AI lies"
                 }
               </CardDescription>
             </div>
@@ -212,19 +224,32 @@ export function HallucinationWatchdogSection({ data, brandId, userTier }: Halluc
                   <Lock className="w-8 h-8 text-amber-500" />
                 </div>
                 <h3 className="text-lg font-semibold mb-2">
-                  {!isPro ? "Unlock Hallucination Detection" : "Enable in Your Next Analysis"}
+                  {showUpgradePrompt 
+                    ? "Unlock Hallucination Detection" 
+                    : wasEnabledButNoResult
+                      ? "Website Crawl Required"
+                      : "Enable in Your Next Analysis"
+                  }
                 </h3>
                 <p className="text-sm text-muted-foreground mb-4 max-w-sm mx-auto">
-                  {!isPro 
+                  {showUpgradePrompt 
                     ? "Upgrade to Pro to detect when AI lies about your brand's pricing, features, and availability."
-                    : "Toggle 'AI Hallucination Detection' when running your next analysis to see results here."
+                    : wasEnabledButNoResult
+                      ? "Hallucination detection needs your website crawl data as 'ground truth'. Crawl your website first, then run another analysis."
+                      : "Toggle 'AI Hallucination Detection' when running your next analysis to see results here."
                   }
                 </p>
-                {!isPro ? (
+                {showUpgradePrompt ? (
                   <Link href="/billing">
                     <Button className="bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-white">
                       <Crown className="w-4 h-4 mr-2" />
                       Upgrade to Pro
+                    </Button>
+                  </Link>
+                ) : wasEnabledButNoResult ? (
+                  <Link href={brandId ? `/brands/${brandId}/edit` : "#"}>
+                    <Button className="bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-white">
+                      Crawl Website
                     </Button>
                   </Link>
                 ) : (
@@ -255,45 +280,14 @@ export function HallucinationWatchdogSection({ data, brandId, userTier }: Halluc
     );
   }
 
-  // Watchdog was enabled but no result (no ground truth data)
-  if (data.enabled && !data.result) {
-    return (
-      <Card className="border-amber-500/30" id="watchdog">
-        <CardHeader>
-          <div className="flex items-center gap-3">
-            <div className="p-3 rounded-xl bg-amber-500/10">
-              <ShieldAlert className="w-6 h-6 text-amber-500" />
-            </div>
-            <div className="flex-1">
-              <div className="flex items-center gap-2">
-                <CardTitle className="text-lg">AI Hallucination Detection</CardTitle>
-                <Badge className="bg-gradient-to-r from-amber-500 to-orange-500 text-white text-xs font-bold">
-                  <Crown className="w-3 h-3 mr-1" />
-                  PRO
-                </Badge>
-              </div>
-              <CardDescription>
-                Awaiting ground truth data
-              </CardDescription>
-            </div>
-          </div>
-        </CardHeader>
-        <CardContent>
-          <div className="flex items-center gap-4 p-4 rounded-xl bg-muted/50">
-            <ShieldAlert className="w-8 h-8 text-muted-foreground" />
-            <div className="flex-1">
-              <p className="font-medium">Ground truth data not available</p>
-              <p className="text-sm text-muted-foreground">
-                Enable hallucination detection in your next analysis - we&apos;ll automatically scan your website.
-              </p>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-    );
+  // At this point, data exists, was enabled, and has a result
+  // (all other cases are handled in the first if block)
+  if (!data || !data.result) {
+    // This should never happen, but TypeScript needs this check
+    return null;
   }
 
-  const result = data.result!;
+  const result = data.result;
   const hasIssues = result.has_hallucinations;
 
   return (

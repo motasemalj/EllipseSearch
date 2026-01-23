@@ -566,36 +566,78 @@ export function thoroughVisibilityCheck(
   brandName?: string
 ): { isVisible: boolean; mentions: string[] } {
   const mentions: string[] = [];
-  const responseLower = response.toLowerCase();
+  
+  // Strip HTML tags for cleaner matching
+  const textContent = stripHtmlToText(response);
+  const responseLower = textContent.toLowerCase();
+  
+  // Also check the raw response in case HTML-encoded brand names
+  const rawResponseLower = response.toLowerCase();
+  
+  // Helper to check for brand mention with word boundary awareness
+  const checkMention = (text: string, term: string): boolean => {
+    if (term.length < 2) return false;
+    const termLower = term.toLowerCase();
+    
+    // Direct include check
+    if (text.includes(termLower)) return true;
+    
+    // Check with word boundaries (handles "Brand" vs "rebrand")
+    const wordBoundaryRegex = new RegExp(`\\b${escapeRegex(termLower)}\\b`, 'i');
+    if (wordBoundaryRegex.test(text)) return true;
+    
+    return false;
+  };
   
   // Check brand name if provided
   if (brandName && brandName.length > 2) {
     // Check for exact brand name
-    if (responseLower.includes(brandName.toLowerCase())) {
+    if (checkMention(responseLower, brandName) || checkMention(rawResponseLower, brandName)) {
       mentions.push(brandName);
     }
-    // Check for brand name without common words
-    const simplifiedName = brandName.replace(/properties|realty|real estate|group|holdings|development|developers/gi, '').trim();
-    if (simplifiedName.length > 2 && responseLower.includes(simplifiedName.toLowerCase())) {
-      mentions.push(simplifiedName);
+    
+    // Check for brand name without common words (for real estate, etc.)
+    const simplifiedName = brandName.replace(/properties|realty|real estate|group|holdings|development|developers|company|inc\.?|llc|ltd\.?/gi, '').trim();
+    if (simplifiedName.length > 2 && !mentions.includes(simplifiedName)) {
+      if (checkMention(responseLower, simplifiedName) || checkMention(rawResponseLower, simplifiedName)) {
+        mentions.push(simplifiedName);
+      }
+    }
+    
+    // Check for brand name with common typos/variations
+    const variations = [
+      brandName.replace(/\s+/g, ''), // No spaces
+      brandName.replace(/\s+/g, '-'), // Hyphenated
+      brandName.replace(/\s+/g, '_'), // Underscored
+    ];
+    for (const variation of variations) {
+      if (variation !== brandName && variation.length > 2) {
+        if (checkMention(responseLower, variation) || checkMention(rawResponseLower, variation)) {
+          if (!mentions.includes(variation)) mentions.push(variation);
+        }
+      }
     }
   }
   
   // Check domain
-  if (responseLower.includes(brandDomain.toLowerCase())) {
-    mentions.push(brandDomain);
+  if (checkMention(responseLower, brandDomain) || checkMention(rawResponseLower, brandDomain)) {
+    if (!mentions.includes(brandDomain)) mentions.push(brandDomain);
   }
   
-  // Extract and check domain parts
-  const domainWithoutTLD = brandDomain.replace(/\.(com|ae|co|net|org|io|sa|qa|bh|kw|om).*$/i, "").replace(/^www\./i, "");
-  if (domainWithoutTLD.length > 3 && responseLower.includes(domainWithoutTLD.toLowerCase())) {
-    mentions.push(domainWithoutTLD);
+  // Extract and check domain parts (without TLD)
+  const domainWithoutTLD = brandDomain.replace(/\.(com|ae|co|net|org|io|sa|qa|bh|kw|om|uk|us|ca|au).*$/i, "").replace(/^www\./i, "");
+  if (domainWithoutTLD.length > 3) {
+    if (checkMention(responseLower, domainWithoutTLD) || checkMention(rawResponseLower, domainWithoutTLD)) {
+      if (!mentions.includes(domainWithoutTLD)) mentions.push(domainWithoutTLD);
+    }
   }
   
   // Check aliases
   for (const alias of brandAliases) {
-    if (alias.length > 2 && responseLower.includes(alias.toLowerCase())) {
-      mentions.push(alias);
+    if (alias.length > 2) {
+      if (checkMention(responseLower, alias) || checkMention(rawResponseLower, alias)) {
+        if (!mentions.includes(alias)) mentions.push(alias);
+      }
     }
   }
   
@@ -603,6 +645,13 @@ export function thoroughVisibilityCheck(
     isVisible: mentions.length > 0,
     mentions: Array.from(new Set(mentions)), // Remove duplicates
   };
+}
+
+/**
+ * Escape special regex characters
+ */
+function escapeRegex(string: string): string {
+  return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 /**

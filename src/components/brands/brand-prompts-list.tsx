@@ -337,6 +337,35 @@ export function BrandPromptsList({ brandId, prompts }: BrandPromptsListProps) {
     }
   }, [showAnalyzeDialog, brandId]);
 
+  // Fetch user tier on component mount (not just when dialog opens)
+  useEffect(() => {
+    async function fetchUserTier() {
+      const supabase = createClient();
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user) {
+        const { data: profile } = await supabase
+          .from("profiles")
+          .select("organization_id")
+          .eq("id", user.id)
+          .single();
+        
+        if (profile?.organization_id) {
+          const { data: org } = await supabase
+            .from("organizations")
+            .select("tier, credits_balance")
+            .eq("id", profile.organization_id)
+            .single();
+          
+          if (org) {
+            setUserTier(org.tier as BillingTier);
+            setCreditsBalance(org.credits_balance || 0);
+          }
+        }
+      }
+    }
+    fetchUserTier();
+  }, []);
+
   const tierLimits = TIER_LIMITS[userTier];
   const canUseWatchdog = tierLimits.hallucination_watchdog;
   const estimatedCredits = selectedEngines.length;

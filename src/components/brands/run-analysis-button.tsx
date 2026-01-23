@@ -57,12 +57,41 @@ export function RunAnalysisButton({ brandId, keywordSetId, keywordsCount }: RunA
   const [creditsBalance, setCreditsBalance] = useState<number>(0);
   const [brandDomain, setBrandDomain] = useState<string>("");
 
-  // Fetch user tier, credits, and brand crawl status
+  // Fetch user tier on component mount
+  useEffect(() => {
+    async function fetchUserTier() {
+      const supabase = createClient();
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user) {
+        const { data: profile } = await supabase
+          .from("profiles")
+          .select("organization_id")
+          .eq("id", user.id)
+          .single();
+        
+        if (profile?.organization_id) {
+          const { data: org } = await supabase
+            .from("organizations")
+            .select("tier, credits_balance")
+            .eq("id", profile.organization_id)
+            .single();
+          
+          if (org) {
+            setUserTier(org.tier as BillingTier);
+            setCreditsBalance(org.credits_balance || 0);
+          }
+        }
+      }
+    }
+    fetchUserTier();
+  }, []);
+
+  // Fetch brand crawl status and refresh tier/credits when dialog opens
   useEffect(() => {
     async function fetchData() {
       const supabase = createClient();
       
-      // Get user's organization tier and credits
+      // Refresh user's organization tier and credits
       const { data: { user } } = await supabase.auth.getUser();
       if (user) {
         const { data: profile } = await supabase
