@@ -563,47 +563,128 @@ async function runGrokSimulation(
     ? `The user is searching from ${regionInfo.name}. Prioritize regional results. `
     : "";
 
-  console.log(`[Grok] Running grok-4-1-fast-reasoning: "${keyword}" (region: ${region})`);
+  console.log(`[Grok] Searching with web + X search: "${keyword}" (region: ${region})`);
 
-  // grok-4-1-fast-reasoning is a reasoning model - no tools support
-  // It provides high-quality reasoning without function calling
+  // grok-4-1-fast-reasoning supports function calling and tools
+  // Enable web_search and x_search for real-time information
   const response = await xai.chat.completions.create({
     model: "grok-4-1-fast-reasoning",
     messages: [
       {
         role: "system",
-        content: `You are Grok, an AI by xAI. ${langInstruction}${regionInstruction}Be direct, helpful, and thorough. When discussing products, services, or companies, always cite specific sources with URLs when you reference information. Format your response clearly with sections if the topic is complex.`,
+        content: `You are Grok, an AI by xAI. ${langInstruction}${regionInstruction}Be direct, witty, and cite your sources. Use real-time information from the web and X (Twitter) when relevant.`,
       },
       { role: "user", content: keyword },
     ],
-    // Note: grok-4-1-fast-reasoning doesn't support tools/function calling
-    // It's a reasoning model optimized for quality responses
+    // Enable native xAI tools for real-time search
+    tools: [
+      { type: "function", function: { name: "web_search", description: "Search the web", parameters: { type: "object", properties: {} } } },
+      { type: "function", function: { name: "x_search", description: "Search X/Twitter", parameters: { type: "object", properties: {} } } },
+    ] as unknown as undefined, // Type workaround for xAI-specific tool format
   });
 
-  // Get response content - reasoning models return content directly
+  // Clean up Grok response content - remove function call metadata that leaks into content
   const rawContent = response.choices[0]?.message?.content || "";
-  const content = cleanGrokResponse(rawContent);
+  let content = cleanGrokResponse(rawContent);
   
-  // Log if cleaning was needed
-  if (rawContent !== content && rawContent.length > content.length) {
-    console.log(`[Grok] Cleaned response (${rawContent.length} -> ${content.length} chars)`);
-  }
-  
-  // Check if we got a valid response
-  if (!content || content.trim().length === 0) {
-    console.error(`[Grok] ERROR: Empty response from grok-4-1-fast-reasoning`);
-    console.error(`[Grok] Raw response:`, JSON.stringify(response, null, 2).substring(0, 500));
-    throw new Error("Grok returned empty response");
+  // Log if we had to clean function call metadata
+  if (rawContent !== content) {
+    const cleaned = rawContent.length - content.length;
+    if (cleaned > 0) {
+      console.log(`[Grok] Cleaned ${cleaned} chars of function call metadata from response`);
+    }
+    if (content.length === 0 && rawContent.length > 0) {
+      console.log(`[Grok] WARNING: Entire response was function call metadata. Raw: "${rawContent.substring(0, 200)}..."`);
+    }
   }
   
   const sources: SourceReference[] = [];
   const xPosts: XPost[] = [];
   const searchResults: Array<{ url: string; title: string; snippet: string }> = [];
 
-  // grok-4-1-fast-reasoning doesn't support tool calls
-  // Extract sources directly from the text response
-  const extractedSources = extractSourcesFromResponse(content, { query: keyword, results: [] });
-  sources.push(...extractedSources);
+  // Parse tool calls from response (if any)
+  const toolCalls = response.choices[0]?.message?.tool_calls || [];
+  console.log(`[Grok] Received ${toolCalls.length} tool calls`);
+  
+  for (const toolCall of toolCalls) {
+    // Type assertion for xAI tool call format
+    const tc = toolCall as unknown as { function?: { name: string; arguments?: string } };
+    if (!tc.function) continue;
+    
+    if (tc.function.name === "web_search") {
+      // Parse web search results
+      try {
+        const results = JSON.parse(tc.function.arguments || "{}");
+        if (Array.isArray(results.results)) {
+          for (const result of results.results) {
+            if (result.url) {
+              sources.push({
+                url: result.url,
+                title: result.title || "",
+                snippet: result.snippet || "",
+              });
+              searchResults.push({
+                url: result.url,
+                title: result.title || "",
+                snippet: result.snippet || "",
+              });
+            }
+          }
+        }
+      } catch {
+        console.log("[Grok] Could not parse web search results");
+      }
+    } else if (tc.function.name === "x_search") {
+      // Parse X/Twitter search results
+      try {
+        const results = JSON.parse(tc.function.arguments || "{}");
+        if (Array.isArray(results.posts || results.tweets)) {
+          const posts = results.posts || results.tweets;
+          for (const post of posts) {
+            const xPost: XPost = {
+              post_id: post.id || "",
+              author: post.author || post.user?.username || "",
+              text: post.text || post.content || "",
+              timestamp: post.created_at || post.timestamp,
+              engagement_score: post.engagement || post.likes,
+            };
+            xPosts.push(xPost);
+            
+            // Add X posts as sources with special marking
+            sources.push({
+              url: `https://x.com/i/status/${post.id}`,
+              title: `@${xPost.author}`,
+              snippet: xPost.text,
+              is_x_post: true,
+              x_post_data: xPost,
+            });
+          }
+        }
+      } catch {
+        console.log("[Grok] Could not parse X search results");
+      }
+    }
+  }
+
+  // Fallback: extract sources from text if no tool calls returned sources
+  if (sources.length === 0) {
+    const extractedSources = extractSourcesFromResponse(content, { query: keyword, results: [] });
+    sources.push(...extractedSources);
+  }
+  
+  // FALLBACK: If content is empty but we have sources, generate a placeholder response
+  if (!content && sources.length > 0) {
+    console.log(`[Grok] Content was empty but have ${sources.length} sources - generating fallback response`);
+    const sourceList = sources.slice(0, 5).map(s => s.title || new URL(s.url).hostname).join(", ");
+    content = `Based on search results for "${keyword}", relevant sources include: ${sourceList}. Please see the cited sources for detailed information.`;
+  }
+  
+  // If still no content, log the full response for debugging
+  if (!content || content.trim().length === 0) {
+    console.error(`[Grok] ERROR: Empty response from grok-4-1-fast-reasoning`);
+    console.error(`[Grok] Full API response:`, JSON.stringify(response, null, 2));
+    throw new Error("Grok returned empty response - check logs for details");
+  }
 
   const groundingMetadata: GroundingMetadata = {
     x_posts: xPosts,
@@ -622,7 +703,7 @@ async function runGrokSimulation(
     grounding_metadata: groundingMetadata,
   };
 
-  console.log(`[Grok] Response generated with ${sources.length} sources for: "${keyword}"`);
+  console.log(`[Grok] Response generated with ${sources.length} sources, ${xPosts.length} X posts for: "${keyword}"`);
 
   const standardized = createStandardizedResult(
     'grok',
