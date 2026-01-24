@@ -76,7 +76,12 @@ export async function POST(request: NextRequest) {
       rpaStatus = await isRpaAvailable();
     }
     
+    // Log RPA status for debugging
+    console.log(`[Analysis API] RPA Status: available=${rpaStatus.available}, workers=${rpaStatus.workerCount}, engines=[${rpaStatus.engines.join(",")}]`);
+    
+    // Check if ChatGPT can use RPA: worker must be available AND report chatgpt as ready
     const rpaAvailableForChatGPT = !forceApiMode && rpaStatus.available && rpaStatus.engines.includes('chatgpt');
+    console.log(`[Analysis API] ChatGPT RPA available: ${rpaAvailableForChatGPT} (forceApiMode=${forceApiMode})`);
     
     // Split engines into RPA (ChatGPT if available) and API (others + ChatGPT fallback)
     const rpaEngines: SupportedEngine[] = [];
@@ -87,14 +92,15 @@ export async function POST(request: NextRequest) {
         if (forceApiMode) {
           // User explicitly requested API mode
           apiEngines.push(engine);
-          console.log(`[Analysis API] ChatGPT using API mode (user requested simulation_mode: api)`);
+          console.log(`[Analysis API] ChatGPT -> API mode (user requested simulation_mode: api)`);
         } else if (rpaAvailableForChatGPT) {
-          // RPA worker is online - use RPA for best quality
+          // RPA worker is online and ready for ChatGPT - use RPA for best quality
           rpaEngines.push(engine);
+          console.log(`[Analysis API] ChatGPT -> RPA mode (worker ready)`);
         } else {
-          // RPA worker offline - fallback to API mode
+          // RPA worker offline or not ready - fallback to API mode
           apiEngines.push(engine);
-          console.log(`[Analysis API] ⚠️ ChatGPT falling back to API mode (RPA worker offline: ${rpaStatus.workerCount} workers)`);
+          console.log(`[Analysis API] ChatGPT -> API mode (fallback: RPA ${rpaStatus.available ? 'not ready for chatgpt' : 'offline'})`);
         }
       } else {
         // All other engines use API mode
@@ -102,12 +108,15 @@ export async function POST(request: NextRequest) {
       }
     }
     
-    console.log(`[Analysis API] Engine routing (${engines.length} total):`);
-    if (rpaEngines.length > 0) {
-      console.log(`  ✓ RPA (real browser): ${rpaEngines.join(", ")}`);
-    }
-    if (apiEngines.length > 0) {
-      console.log(`  ✓ API mode: ${apiEngines.join(", ")}`);
+    // Summary of engine routing
+    console.log(`[Analysis API] Engine routing summary:`);
+    console.log(`  - Requested: ${engines.length} engines [${engines.join(", ")}]`);
+    console.log(`  - RPA engines: ${rpaEngines.length} [${rpaEngines.join(", ") || "none"}]`);
+    console.log(`  - API engines: ${apiEngines.length} [${apiEngines.join(", ") || "none"}]`);
+    
+    // Sanity check: all engines should be accounted for
+    if (rpaEngines.length + apiEngines.length !== engines.length) {
+      console.error(`[Analysis API] ⚠️ ENGINE ROUTING BUG: ${rpaEngines.length} + ${apiEngines.length} != ${engines.length}`);
     }
 
     // Use prompt_set_id if provided, fall back to keyword_set_id for backwards compatibility
@@ -336,13 +345,16 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // STEP 3: Trigger API jobs for non-ChatGPT engines
+    // STEP 3: Trigger API jobs for all engines in apiEngines
+    // This includes: all non-ChatGPT engines, plus ChatGPT if RPA is offline/not ready
     if (hasApiWork) {
+      console.log(`[Analysis API] Triggering API job with ${apiEngines.length} engines: [${apiEngines.join(", ")}]`);
+      
       const payload: RunAnalysisInput = {
         brand_id,
         prompt_set_id: setId,
         prompt_ids: prompt_ids,
-        engines: apiEngines, // Only non-ChatGPT engines
+        engines: apiEngines, // Includes ChatGPT if RPA is offline
         language,
         region,
         enable_hallucination_watchdog: enable_hallucination_watchdog || false,
@@ -351,11 +363,13 @@ export async function POST(request: NextRequest) {
 
       try {
         const handle = await tasks.trigger("run-keyword-set-analysis", payload);
-        console.log(`[API] Triggered job for ${apiEngines.join(", ")}:`, handle.id);
+        console.log(`[Analysis API] Trigger job started:`, handle.id);
       } catch (triggerError) {
-        console.error("Failed to trigger API job:", triggerError);
+        console.error("[Analysis API] Failed to trigger API job:", triggerError);
         // Don't fail the whole request, RPA might still work
       }
+    } else {
+      console.log(`[Analysis API] No API engines to trigger (all going to RPA)`);
     }
 
     // Create scheduled analysis if a schedule is specified
