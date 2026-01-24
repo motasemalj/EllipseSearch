@@ -557,7 +557,96 @@ export function quickVisibilityCheck(
 }
 
 /**
+ * Generic words that should NOT count as brand mentions when appearing alone
+ * These are common words that might be part of a brand name but aren't distinctive
+ */
+const GENERIC_WORDS = new Set([
+  // Common business words
+  'tactics', 'strategy', 'solutions', 'services', 'consulting', 'digital', 
+  'marketing', 'agency', 'group', 'partners', 'global', 'international',
+  'creative', 'design', 'studio', 'labs', 'tech', 'media', 'hub', 'pro',
+  'first', 'best', 'top', 'prime', 'elite', 'premium', 'plus', 'max',
+  // Common industry terms
+  'properties', 'realty', 'real', 'estate', 'homes', 'living', 'capital',
+  'ventures', 'investments', 'financial', 'finance', 'wealth', 'advisory',
+  // Common descriptors
+  'smart', 'fast', 'quick', 'easy', 'simple', 'better', 'next', 'new',
+  'online', 'cloud', 'data', 'web', 'app', 'mobile', 'soft', 'software',
+]);
+
+/**
+ * Check if a brand name is too generic to reliably detect
+ * Returns true if the brand name consists mostly of generic words
+ */
+function isGenericBrandName(brandName: string): boolean {
+  const words = brandName.toLowerCase().split(/[\s\-_]+/).filter(w => w.length > 2);
+  if (words.length === 0) return true;
+  
+  const genericCount = words.filter(w => GENERIC_WORDS.has(w)).length;
+  // If more than 50% of words are generic, the brand name is too generic
+  return genericCount / words.length > 0.5;
+}
+
+/**
+ * Get the distinctive part of a brand name (non-generic words)
+ */
+function getDistinctivePart(brandName: string): string | null {
+  const words = brandName.split(/[\s\-_]+/).filter(w => w.length > 2);
+  const distinctive = words.filter(w => !GENERIC_WORDS.has(w.toLowerCase()));
+  
+  if (distinctive.length === 0) return null;
+  return distinctive.join(' ');
+}
+
+/**
+ * Check if a mention is in context of a proper noun/brand (not generic usage)
+ * Uses surrounding words to determine if it's likely a brand reference
+ */
+function isLikelyBrandContext(text: string, term: string, position: number): boolean {
+  const termLower = term.toLowerCase();
+  
+  // Get surrounding context (50 chars before and after)
+  const start = Math.max(0, position - 50);
+  const end = Math.min(text.length, position + term.length + 50);
+  const context = text.slice(start, end).toLowerCase();
+  
+  // Indicators that it's a brand mention (not generic)
+  const brandIndicators = [
+    // Company/organization references
+    /\b(by|from|at|with|visit|contact|according to|says|announced|partnered|founded)\s+/i,
+    // Possessive forms
+    new RegExp(`${escapeRegex(termLower)}'s`, 'i'),
+    // URL/link context
+    /https?:\/\/|\.com|\.ae|\.io/i,
+    // Quotation marks around it
+    new RegExp(`["']${escapeRegex(termLower)}["']`, 'i'),
+  ];
+  
+  // Check if any brand indicators are present in the context
+  for (const indicator of brandIndicators) {
+    if (indicator.test(context)) {
+      return true;
+    }
+  }
+  
+  // Check if it's at the start of a sentence (often indicates proper noun)
+  const beforeTerm = text.slice(start, position);
+  if (/[.!?]\s*$/.test(beforeTerm) || position === 0) {
+    return true;
+  }
+  
+  // If the term is capitalized in the original text, it's more likely a brand
+  const originalTerm = text.slice(position, position + term.length);
+  if (originalTerm[0] === originalTerm[0].toUpperCase() && /[a-z]/.test(originalTerm)) {
+    return true;
+  }
+  
+  return false;
+}
+
+/**
  * More thorough visibility check that also considers context
+ * ENHANCED: Now smarter about generic brand names to avoid false positives
  */
 export function thoroughVisibilityCheck(
   response: string,
@@ -588,53 +677,101 @@ export function thoroughVisibilityCheck(
     
     return false;
   };
-  
-  // Check brand name if provided
-  if (brandName && brandName.length > 2) {
-    // Check for exact brand name
-    if (checkMention(responseLower, brandName) || checkMention(rawResponseLower, brandName)) {
-      mentions.push(brandName);
-    }
+
+  // Helper to check mention with context awareness for generic terms
+  const checkMentionWithContext = (text: string, originalText: string, term: string, requireContext: boolean): boolean => {
+    if (term.length < 2) return false;
+    const termLower = term.toLowerCase();
     
-    // Check for brand name without common words (for real estate, etc.)
-    const simplifiedName = brandName.replace(/properties|realty|real estate|group|holdings|development|developers|company|inc\.?|llc|ltd\.?/gi, '').trim();
-    if (simplifiedName.length > 2 && !mentions.includes(simplifiedName)) {
-      if (checkMention(responseLower, simplifiedName) || checkMention(rawResponseLower, simplifiedName)) {
-        mentions.push(simplifiedName);
+    // Check with word boundaries
+    const wordBoundaryRegex = new RegExp(`\\b${escapeRegex(termLower)}\\b`, 'gi');
+    let match;
+    
+    while ((match = wordBoundaryRegex.exec(text)) !== null) {
+      if (!requireContext) {
+        return true;
+      }
+      // For generic terms, require brand context
+      if (isLikelyBrandContext(originalText, term, match.index)) {
+        return true;
       }
     }
     
-    // Check for brand name with common typos/variations
-    const variations = [
-      brandName.replace(/\s+/g, ''), // No spaces
-      brandName.replace(/\s+/g, '-'), // Hyphenated
-      brandName.replace(/\s+/g, '_'), // Underscored
-    ];
-    for (const variation of variations) {
-      if (variation !== brandName && variation.length > 2) {
-        if (checkMention(responseLower, variation) || checkMention(rawResponseLower, variation)) {
-          if (!mentions.includes(variation)) mentions.push(variation);
+    return false;
+  };
+  
+  // Check brand name if provided
+  if (brandName && brandName.length > 2) {
+    const isGeneric = isGenericBrandName(brandName);
+    
+    // For generic brand names, require full name match OR context-aware partial match
+    if (isGeneric) {
+      // First try exact full brand name match (always valid)
+      if (checkMention(responseLower, brandName) || checkMention(rawResponseLower, brandName)) {
+        mentions.push(brandName);
+      } else {
+        // For generic brands, check if the distinctive part appears with brand context
+        const distinctivePart = getDistinctivePart(brandName);
+        if (distinctivePart && distinctivePart.length > 3) {
+          if (checkMentionWithContext(responseLower, textContent, distinctivePart, true) ||
+              checkMentionWithContext(rawResponseLower, response, distinctivePart, true)) {
+            mentions.push(distinctivePart);
+          }
+        }
+      }
+    } else {
+      // Non-generic brand names: standard matching
+      if (checkMention(responseLower, brandName) || checkMention(rawResponseLower, brandName)) {
+        mentions.push(brandName);
+      }
+      
+      // Check for brand name without common words (for real estate, etc.)
+      const simplifiedName = brandName.replace(/properties|realty|real estate|group|holdings|development|developers|company|inc\.?|llc|ltd\.?/gi, '').trim();
+      if (simplifiedName.length > 2 && !mentions.includes(simplifiedName)) {
+        if (checkMention(responseLower, simplifiedName) || checkMention(rawResponseLower, simplifiedName)) {
+          mentions.push(simplifiedName);
+        }
+      }
+      
+      // Check for brand name with common typos/variations
+      const variations = [
+        brandName.replace(/\s+/g, ''), // No spaces
+        brandName.replace(/\s+/g, '-'), // Hyphenated
+        brandName.replace(/\s+/g, '_'), // Underscored
+      ];
+      for (const variation of variations) {
+        if (variation !== brandName && variation.length > 2) {
+          if (checkMention(responseLower, variation) || checkMention(rawResponseLower, variation)) {
+            if (!mentions.includes(variation)) mentions.push(variation);
+          }
         }
       }
     }
   }
   
-  // Check domain
+  // Check domain - domain matches are always reliable
   if (checkMention(responseLower, brandDomain) || checkMention(rawResponseLower, brandDomain)) {
     if (!mentions.includes(brandDomain)) mentions.push(brandDomain);
   }
   
-  // Extract and check domain parts (without TLD)
+  // Extract and check domain parts (without TLD) - more reliable than generic brand names
   const domainWithoutTLD = brandDomain.replace(/\.(com|ae|co|net|org|io|sa|qa|bh|kw|om|uk|us|ca|au).*$/i, "").replace(/^www\./i, "");
   if (domainWithoutTLD.length > 3) {
-    if (checkMention(responseLower, domainWithoutTLD) || checkMention(rawResponseLower, domainWithoutTLD)) {
-      if (!mentions.includes(domainWithoutTLD)) mentions.push(domainWithoutTLD);
+    // Only match domain part if it's not a generic word
+    if (!GENERIC_WORDS.has(domainWithoutTLD.toLowerCase())) {
+      if (checkMention(responseLower, domainWithoutTLD) || checkMention(rawResponseLower, domainWithoutTLD)) {
+        if (!mentions.includes(domainWithoutTLD)) mentions.push(domainWithoutTLD);
+      }
     }
   }
   
-  // Check aliases
+  // Check aliases - these are user-defined so we trust them more
   for (const alias of brandAliases) {
     if (alias.length > 2) {
+      // Skip single generic words as aliases
+      if (alias.split(/\s+/).length === 1 && GENERIC_WORDS.has(alias.toLowerCase())) {
+        continue;
+      }
       if (checkMention(responseLower, alias) || checkMention(rawResponseLower, alias)) {
         if (!mentions.includes(alias)) mentions.push(alias);
       }

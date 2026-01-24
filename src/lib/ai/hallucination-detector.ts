@@ -60,6 +60,7 @@ export interface HallucinationResult {
   hallucinations: DetectedHallucination[];
   accuracy_score: number; // 0-100
   confidence: "high" | "medium" | "low";
+  summary: string; // Brief summary of the analysis
   analysis_notes: string[];
 }
 
@@ -183,6 +184,7 @@ export async function detectHallucinations(
       hallucinations: [],
       accuracy_score: 50, // Unknown accuracy without ground truth
       confidence: "low",
+      summary: "Insufficient website data for hallucination detection. Run another analysis after website crawl completes.",
       analysis_notes: ["Insufficient ground truth data for comparison"],
     };
   }
@@ -190,14 +192,31 @@ export async function detectHallucinations(
   const systemPrompt = `You are a hallucination detection expert. Your job is to compare AI-generated claims about a brand against verified ground truth from the brand's website.
 
 IMPORTANT DEFINITIONS:
-- POSITIVE HALLUCINATION: AI claims something that isn't true (e.g., "has free plan" when no free plan exists)
-- NEGATIVE HALLUCINATION: AI says "I don't know" or refuses to answer when the information IS available
-- MISATTRIBUTION: AI attributes wrong products, services, or features to the brand
-- OUTDATED: AI uses information that contradicts current website content
+- POSITIVE HALLUCINATION: AI claims something that is CLEARLY FALSE (e.g., "has free plan" when no free plan exists)
+- NEGATIVE HALLUCINATION: AI says "I don't know" or refuses to answer when the information IS clearly available
+- MISATTRIBUTION: AI attributes WRONG products, services, or features to the brand
+- OUTDATED: AI uses information that CLEARLY contradicts current website content
 
-Be thorough but fair. Only flag clear discrepancies, not minor wording differences.`;
+CRITICAL RULES FOR DETECTION:
+1. DO NOT flag minor wording differences or paraphrasing as hallucinations
+2. DO NOT flag approximate values that are "in the ballpark" (e.g., "around $100" when actual is $99)
+3. DO NOT flag general/vague statements that could reasonably be inferred
+4. DO NOT flag missing details as negative hallucinations unless the AI explicitly says it doesn't know
+5. ONLY flag claims that are materially wrong and could mislead a customer
+6. When in doubt, DO NOT flag it - err on the side of giving the AI credit
 
-  const userPrompt = `Analyze this AI response about "${brandName}" (${brandDomain}) for hallucinations:
+Examples of what IS a hallucination:
+- AI says "free plan available" when there is no free plan
+- AI says "24/7 phone support" when only email support exists
+- AI says "founded in 2010" when founded in 2020
+
+Examples of what is NOT a hallucination:
+- AI says "competitive pricing" without mentioning exact prices
+- AI says "various service options" without listing every service
+- AI rounds or approximates numbers within reasonable bounds
+- AI uses different wording to describe the same thing`;
+
+  const userPrompt = `Analyze this AI response about "${brandName}" (${brandDomain}) for SIGNIFICANT hallucinations only:
 
 **AI RESPONSE:**
 ${aiResponse.slice(0, 3000)}
@@ -212,6 +231,7 @@ Compare the AI response against the ground truth and return JSON:
   "has_hallucinations": true/false,
   "accuracy_score": 0-100,
   "confidence": "high"/"medium"/"low",
+  "summary": "Brief summary of the analysis - if no hallucinations, say 'No significant hallucinations detected. The AI response is accurate.'",
   "hallucinations": [
     {
       "type": "positive"/"negative"/"misattribution"/"outdated",
@@ -225,7 +245,13 @@ Compare the AI response against the ground truth and return JSON:
   "analysis_notes": ["note1", "note2"]
 }
 
-SEVERITY GUIDE:
+IMPORTANT:
+- Return an EMPTY hallucinations array [] if no significant issues are found
+- Only include hallucinations that would actually mislead a customer
+- Ignore minor wording differences, approximations, or reasonable inferences
+- A good AI response with no issues should have: accuracy_score >= 90, has_hallucinations: false
+
+SEVERITY GUIDE (only flag if clearly wrong):
 - critical: Core business info wrong (pricing, main product category)
 - major: Important feature or service misrepresented
 - minor: Small detail inaccurate`;
@@ -264,11 +290,17 @@ SEVERITY GUIDE:
       })
     );
 
+    const hasIssues = result.has_hallucinations || hallucinations.length > 0;
+    const defaultSummary = hasIssues 
+      ? `Found ${hallucinations.length} issue${hallucinations.length === 1 ? '' : 's'} in the AI response that may mislead customers.`
+      : "No significant hallucinations detected. The AI response is accurate.";
+
     return {
-      has_hallucinations: result.has_hallucinations || hallucinations.length > 0,
+      has_hallucinations: hasIssues,
       hallucinations,
       accuracy_score: result.accuracy_score ?? 75,
       confidence: result.confidence || "medium",
+      summary: result.summary || defaultSummary,
       analysis_notes: [...analysisNotes, ...(result.analysis_notes || [])],
     };
   } catch (error) {
@@ -278,6 +310,7 @@ SEVERITY GUIDE:
       hallucinations: [],
       accuracy_score: 50,
       confidence: "low",
+      summary: "Hallucination analysis could not be completed.",
       analysis_notes: ["Hallucination analysis could not be completed"],
     };
   }

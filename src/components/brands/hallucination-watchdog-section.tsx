@@ -256,7 +256,7 @@ export function HallucinationWatchdogSection({ data, brandId, userTier }: Halluc
                   {showUpgradePrompt 
                     ? "Unlock Hallucination Detection" 
                     : wasEnabledButNoGroundTruth
-                      ? "Website Crawl Required"
+                      ? "Gathering Website Data"
                       : wasEnabledButNoResult
                         ? "Detection Encountered an Issue"
                         : "Enable in Your Next Analysis"
@@ -266,7 +266,7 @@ export function HallucinationWatchdogSection({ data, brandId, userTier }: Halluc
                   {showUpgradePrompt 
                     ? "Upgrade to Pro to detect when AI lies about your brand's pricing, features, and availability."
                     : wasEnabledButNoGroundTruth
-                      ? "Hallucination detection needs your website crawl data as 'ground truth'. Crawl your website first, then run another analysis."
+                      ? "Your website will be crawled automatically when you run the next analysis. The crawl provides 'ground truth' data needed to detect AI hallucinations."
                       : wasEnabledButNoResult
                         ? "The detection was enabled but couldn't complete. Please try running the analysis again."
                         : "Toggle 'AI Hallucination Detection' when running your next analysis to see results here."
@@ -280,11 +280,9 @@ export function HallucinationWatchdogSection({ data, brandId, userTier }: Halluc
                     </Button>
                   </Link>
                 ) : wasEnabledButNoGroundTruth ? (
-                  <Link href={brandId ? `/brands/${brandId}/edit` : "#"}>
-                    <Button className="bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-white">
-                      Crawl Website
-                    </Button>
-                  </Link>
+                  <p className="text-xs text-amber-600 dark:text-amber-400">
+                    Run a new analysis — website crawl will start automatically
+                  </p>
                 ) : wasEnabledButNoResult ? (
                   <p className="text-xs text-amber-600 dark:text-amber-400">
                     Please try running the analysis again
