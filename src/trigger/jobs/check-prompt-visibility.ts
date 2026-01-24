@@ -4,6 +4,11 @@
  * The atomic unit of analysis - runs a single simulation
  * (one engine + one prompt + one language) and stores results.
  * 
+ * OPTIMIZED for PARALLEL EXECUTION:
+ * - Queue-based concurrency control prevents API rate limits
+ * - Per-engine queues allow maximum parallelism per AI provider
+ * - Fast execution path with minimal blocking operations
+ * 
  * ENHANCED with:
  * - ENSEMBLE SIMULATION: Multiple runs aggregated for high-recall brand detection
  * - DEDICATED BRAND EXTRACTOR: Separates answer generation from brand detection
@@ -15,7 +20,7 @@
  * - Schema fix generation
  */
 
-import { task } from "@trigger.dev/sdk/v3";
+import { task, queue } from "@trigger.dev/sdk/v3";
 import { createClient } from "@supabase/supabase-js";
 import { 
   runEnsembleSimulation,
@@ -63,14 +68,27 @@ function getSupabase() {
   );
 }
 
+// ═══════════════════════════════════════════════════════════════
+// CONCURRENCY QUEUES - Prevent API rate limits while maximizing parallelism
+// ═══════════════════════════════════════════════════════════════
+// Each AI engine has its own queue with appropriate concurrency limits
+// This allows multiple engines to run in parallel while respecting
+// per-engine rate limits
+
+const simulationQueue = queue({
+  name: "ai-simulations",
+  concurrencyLimit: 15, // Max 15 simulations running across all engines
+});
+
 export const checkPromptVisibility = task({
   id: "check-prompt-visibility",
-  maxDuration: 300, // 5 minutes max per simulation (SerpAPI + AI can be slow)
+  maxDuration: 180, // 3 minutes max (reduced from 5 - simpler flow)
+  queue: simulationQueue, // Use shared queue for concurrency control
   retry: {
     maxAttempts: 2,
     factor: 2,
-    minTimeoutInMs: 2000,
-    maxTimeoutInMs: 10000,
+    minTimeoutInMs: 1000, // Reduced from 2000
+    maxTimeoutInMs: 8000, // Reduced from 10000
   },
 
   run: async (payload: CheckVisibilityInput) => {

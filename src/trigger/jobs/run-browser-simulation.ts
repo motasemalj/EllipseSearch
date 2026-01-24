@@ -14,7 +14,7 @@
  * - Hybrid mode support (API + Browser)
  */
 
-import { task } from "@trigger.dev/sdk/v3";
+import { task, queue } from "@trigger.dev/sdk/v3";
 import { createClient } from "@supabase/supabase-js";
 import { 
   runBrowserSimulation, 
@@ -26,6 +26,12 @@ import type {
   SupportedLanguage,
   SupportedRegion,
 } from "@/types";
+
+// Browser simulation queue - controls parallelism for browser-based simulations
+const browserSimQueue = queue({
+  name: "browser-simulations",
+  concurrencyLimit: 8, // Max 8 browser simulations at once (browser pool limit)
+});
 
 // ===========================================
 // Types
@@ -84,12 +90,13 @@ function getSupabase() {
 
 export const runBrowserSimulationTask = task({
   id: "run-browser-simulation",
-  maxDuration: 600, // 10 minutes max (browser ops can be slow)
+  maxDuration: 180, // 3 minutes max (reduced - faster with queue management)
+  queue: browserSimQueue, // Use queue for concurrency control
   retry: {
     maxAttempts: 2,
     factor: 2,
-    minTimeoutInMs: 5000,
-    maxTimeoutInMs: 30000,
+    minTimeoutInMs: 2000, // Reduced from 5000
+    maxTimeoutInMs: 15000, // Reduced from 30000
   },
 
   run: async (payload: BrowserSimulationInput): Promise<BrowserSimulationOutput> => {
@@ -305,9 +312,13 @@ export interface BatchBrowserSimulationInput {
 
 export const batchBrowserSimulationTask = task({
   id: "batch-browser-simulation",
-  maxDuration: 1800, // 30 minutes for batch
+  maxDuration: 600, // 10 minutes max (reduced from 30 - parallelism makes it faster)
   retry: {
     maxAttempts: 1,
+  },
+  // Use queue for concurrency control
+  queue: {
+    concurrencyLimit: 3, // Max 3 batch browser jobs at once
   },
 
   run: async (payload: BatchBrowserSimulationInput) => {
@@ -321,16 +332,19 @@ export const batchBrowserSimulationTask = task({
       mode,
     } = payload;
 
-    console.log(`[BatchBrowserSim] Starting batch: ${prompt_ids.length} prompts x ${engines.length} engines`);
+    const totalSimulations = prompt_ids.length * engines.length;
+    console.log(`[BatchBrowserSim] Starting PARALLEL batch: ${prompt_ids.length} prompts x ${engines.length} engines = ${totalSimulations} simulations`);
 
-    const results: BrowserSimulationOutput[] = [];
-
-    // Process sequentially to avoid overwhelming browser pool
-    // In production, you might want to parallelize with rate limiting
+    // ═══════════════════════════════════════════════════════════════
+    // PARALLEL EXECUTION - Run all simulations simultaneously
+    // ═══════════════════════════════════════════════════════════════
+    
+    // Build all payloads
+    const simulationPayloads = [];
     for (const prompt_id of prompt_ids) {
       for (const engine of engines) {
-        try {
-          const result = await runBrowserSimulationTask.triggerAndWait({
+        simulationPayloads.push({
+          payload: {
             brand_id,
             prompt_id,
             analysis_batch_id,
@@ -338,34 +352,45 @@ export const batchBrowserSimulationTask = task({
             language,
             region,
             mode,
-          });
+          },
+        });
+      }
+    }
 
-          if (result.ok) {
-            results.push(result.output);
-          } else {
-            console.error(`[BatchBrowserSim] Task failed for ${engine}/${prompt_id}:`, result.error);
-            results.push({
-              prompt_id,
-              engine,
-              mode,
-              is_visible: false,
-              citation_count: 0,
-              source_card_count: 0,
-              search_chip_count: 0,
-              has_knowledge_panel: false,
-              response_time_ms: 0,
-              total_time_ms: 0,
-              success: false,
-              error_message: 'Task execution failed',
-            });
-          }
+    const startTime = Date.now();
+    
+    // Execute ALL simulations in parallel
+    const batchResults = await runBrowserSimulationTask.batchTriggerAndWait(simulationPayloads);
+    
+    const duration = Date.now() - startTime;
+    const runResults = batchResults.runs || [];
+    console.log(`[BatchBrowserSim] All ${runResults.length} simulations completed in ${Math.round(duration / 1000)}s`);
 
-          // Small delay between runs to be gentle on AI platforms
-          await new Promise(resolve => setTimeout(resolve, 2000));
-
-        } catch (error) {
-          console.error(`[BatchBrowserSim] Error for ${engine}/${prompt_id}:`, error);
-        }
+    // Process results
+    const results: BrowserSimulationOutput[] = [];
+    
+    for (let i = 0; i < runResults.length; i++) {
+      const result = runResults[i];
+      const payload = simulationPayloads[i].payload;
+      
+      if (result.ok) {
+        results.push(result.output);
+      } else {
+        console.error(`[BatchBrowserSim] Failed: ${payload.engine}/${payload.prompt_id}:`, result.error);
+        results.push({
+          prompt_id: payload.prompt_id,
+          engine: payload.engine,
+          mode,
+          is_visible: false,
+          citation_count: 0,
+          source_card_count: 0,
+          search_chip_count: 0,
+          has_knowledge_panel: false,
+          response_time_ms: 0,
+          total_time_ms: 0,
+          success: false,
+          error_message: 'Task execution failed',
+        });
       }
     }
 
@@ -373,14 +398,16 @@ export const batchBrowserSimulationTask = task({
     await shutdownBrowserPool();
 
     const successCount = results.filter(r => r.success).length;
-    const totalCount = results.length;
+    const avgTime = Math.round(duration / totalSimulations);
 
-    console.log(`[BatchBrowserSim] Complete: ${successCount}/${totalCount} successful`);
+    console.log(`[BatchBrowserSim] Complete: ${successCount}/${totalSimulations} successful (${avgTime}ms avg per simulation)`);
 
     return {
-      total: totalCount,
+      total: totalSimulations,
       successful: successCount,
-      failed: totalCount - successCount,
+      failed: totalSimulations - successCount,
+      duration_ms: duration,
+      avg_time_per_simulation_ms: avgTime,
       results,
     };
   },

@@ -10,7 +10,7 @@
  * 3. Updates simulation with full analysis
  */
 
-import { task, tasks } from "@trigger.dev/sdk/v3";
+import { task, tasks, queue } from "@trigger.dev/sdk/v3";
 import { createClient } from "@supabase/supabase-js";
 import { 
   analyzeSelectionSignals,
@@ -40,6 +40,12 @@ function getSupabase() {
   );
 }
 
+// RPA analysis queue - controls parallelism for GPT analysis calls
+const rpaAnalysisQueue = queue({
+  name: "rpa-analysis",
+  concurrencyLimit: 10, // Max 10 RPA analyses at once (GPT rate limits)
+});
+
 interface AnalyzeRpaSimulationInput {
   simulation_id: string;
   brand_id: string;
@@ -52,12 +58,13 @@ interface AnalyzeRpaSimulationInput {
 
 export const analyzeRpaSimulation = task({
   id: "analyze-rpa-simulation",
-  maxDuration: 120, // 2 minutes max
+  maxDuration: 90, // 1.5 minutes max (reduced from 2)
+  queue: rpaAnalysisQueue, // Use queue for concurrency control
   retry: {
     maxAttempts: 2,
     factor: 2,
-    minTimeoutInMs: 2000,
-    maxTimeoutInMs: 10000,
+    minTimeoutInMs: 1000, // Reduced from 2000
+    maxTimeoutInMs: 8000, // Reduced from 10000
   },
 
   run: async (payload: AnalyzeRpaSimulationInput) => {

@@ -3,27 +3,24 @@
  * 
  * Orchestrates a multi-prompt, multi-engine analysis run.
  * 
- * FLOW:
- * 1. CRAWL the brand website FIRST (if not recently crawled)
- * 2. Wait for crawl to complete
- * 3. Run simulations - all recommendations based on crawl data
+ * OPTIMIZED FLOW (v2 - Parallel Execution):
+ * 1. FIRE crawl job in background (non-blocking)
+ * 2. Run ALL simulations in PARALLEL using batchTriggerAndWait
+ * 3. Collect results and update batch status
+ * 
+ * Performance improvements:
+ * - All prompt/engine combinations run simultaneously
+ * - Crawl runs in parallel, doesn't block simulations
+ * - Uses Trigger.dev batch processing for optimal throughput
+ * - Queue-based concurrency control prevents rate limiting
  * 
  * Supports both prompt sets AND individual prompts.
- * Processes simulations sequentially to avoid rate limits.
  */
 
-import { task } from "@trigger.dev/sdk/v3";
+import { task, tasks } from "@trigger.dev/sdk/v3";
 import { createClient } from "@supabase/supabase-js";
 import type { SupportedEngine, RunAnalysisInput, SimulationMode } from "@/types";
 import { DEFAULT_BROWSER_SIMULATION_MODE } from "@/lib/ai/openai-config";
-import { 
-  startCrawl, 
-  waitForCrawl, 
-  fetchRobotsTxt,
-  extractGroundTruth,
-} from "@/lib/firecrawl/client";
-import { analyzeCrawledContent } from "@/lib/ai/crawl-analyzer";
-import { extractGroundTruthData } from "@/lib/ai/hallucination-detector";
 
 // Create Supabase client with service role for job access
 function getSupabase() {
@@ -39,7 +36,12 @@ const CRAWL_FRESHNESS_HOURS = 24;
 // Alias for backwards compatibility
 export const runKeywordSetAnalysis = task({
   id: "run-keyword-set-analysis",
-  maxDuration: 900, // 15 minutes max
+  maxDuration: 600, // 10 minutes max (reduced from 15 - parallelism makes it faster)
+  
+  // Use a queue to manage concurrency across multiple analysis runs
+  queue: {
+    concurrencyLimit: 5, // Max 5 analysis batches running at once
+  },
 
   run: async (payload: RunAnalysisInput) => {
     // Support both prompt_set_id (new) and keyword_set_id (legacy)
@@ -160,25 +162,17 @@ export const runKeywordSetAnalysis = task({
     }
 
     // ═══════════════════════════════════════════════════════════════
-    // 4. CRAWL BRAND WEBSITE FIRST (REQUIRED for actionable recs)
+    // 4. FIRE CRAWL IN BACKGROUND (NON-BLOCKING)
     // ═══════════════════════════════════════════════════════════════
-    // Actionable Recommendations are ONLY generated from crawl data.
-    // If no crawl data exists, we MUST crawl first.
+    // Crawl runs in parallel - simulations start IMMEDIATELY
+    // Crawl data will be used if available, otherwise generic recs
     // ═══════════════════════════════════════════════════════════════
     
     const needsCrawl = !brand.last_crawled_at || 
       (Date.now() - new Date(brand.last_crawled_at).getTime()) > CRAWL_FRESHNESS_HOURS * 60 * 60 * 1000;
     
-    let crawlSuccessful = !needsCrawl; // If we don't need to crawl, existing data is valid
-    
-    if (needsCrawl) {
-      console.log(`🕷️ CRAWLING ${brand.domain} - Required for Actionable Recommendations`);
-      console.log(`   Without crawl data, only generic Suggestions will be available`);
-      
-      await supabase
-        .from("analysis_batches")
-        .update({ error_message: "Crawling website for actionable recommendations..." })
-        .eq("id", batchId);
+    if (needsCrawl && brand.domain) {
+      console.log(`🕷️ Triggering background crawl for ${brand.domain} (non-blocking)`);
       
       // Ensure domain has protocol
       let startUrl = brand.domain;
@@ -186,201 +180,40 @@ export const runKeywordSetAnalysis = task({
         startUrl = `https://${startUrl}`;
       }
       
-      // Retry crawl up to 2 times
-      for (let attempt = 1; attempt <= 2; attempt++) {
-        try {
-          console.log(`🕷️ Crawl attempt ${attempt}/2...`);
-          
-          // Start crawl
-          const crawlStart = await startCrawl(startUrl, {
-            maxPages: 30,
-            maxDepth: 2,
-            formats: ["markdown", "html"],
-          });
-          
-          if (!crawlStart.success || !crawlStart.jobId) {
-            console.warn(`⚠️ Attempt ${attempt}: Crawl failed to start: ${crawlStart.error}`);
-            continue;
-          }
-          
-          console.log(`🕷️ Crawl job started: ${crawlStart.jobId}`);
-          
-          // Wait for crawl to complete
-          const crawlResult = await waitForCrawl(crawlStart.jobId, {
-            maxWaitMs: 180000, // 3 minutes max
-            pollIntervalMs: 5000,
-            onProgress: (status) => {
-              console.log(`🕷️ Crawl progress: ${status.pages.length} pages...`);
-            },
-          });
-          
-          if (!crawlResult.success || crawlResult.pages.length === 0) {
-            console.warn(`⚠️ Attempt ${attempt}: Crawl returned 0 pages`);
-            continue;
-          }
-          
-          // SUCCESS - Process crawl data
-          console.log(`✓ Crawl SUCCESS: ${crawlResult.pages.length} pages`);
-          
-          // Normalize page URLs (ensure they have protocol)
-          const normalizedPages = crawlResult.pages.map(page => ({
-            ...page,
-            url: page.url?.startsWith('http') ? page.url : `https://${brand.domain}${page.url?.startsWith('/') ? '' : '/'}${page.url || ''}`,
-          })).filter(page => page.url && page.url.length > 0);
-          
-          console.log(`📄 Normalized ${normalizedPages.length} pages`);
-          
-          // Fetch robots.txt (separate try-catch so it doesn't fail the whole process)
-          let robotsTxt: string | null = null;
-          try {
-            robotsTxt = await fetchRobotsTxt(brand.domain);
-          } catch (robotsError) {
-            console.warn(`⚠️ Could not fetch robots.txt: ${robotsError}`);
-          }
-          
-          // Run full analysis on crawled content
-          console.log(`📊 Analyzing crawled content for actionable recommendations...`);
-          let crawlAnalysis;
-          try {
-            crawlAnalysis = await analyzeCrawledContent(
-              normalizedPages,
-              brand.name,
-              brand.domain,
-              robotsTxt || undefined
-            );
-          } catch (analysisError) {
-            console.error(`❌ Analysis error: ${analysisError}`);
-            // Create a minimal analysis so we can continue
-            crawlAnalysis = {
-              crawler_access: { robots_txt_found: false, blocks_gptbot: false, blocks_google_extended: false, blocks_claudebot: false, blocks_all_bots: false, blocking_lines: [] },
-              schema_markup: { has_schema: false, schema_types_found: [], missing_critical_schemas: ['Organization'], schema_issues: [] },
-              brand_entity: { homepage_h1_vague: false, homepage_h1_issues: [], meta_description_length: 0, brand_name_in_title: false, brand_name_in_h1: false, brand_name_in_meta: false },
-              content_structure: { has_pricing_page: false, pricing_in_top_20_percent: false, has_faq_page: false, has_about_page: false, average_heading_structure_score: 3, pages_missing_h1: 0 },
-              authority_signals: { has_press_page: false, has_media_mentions: false, media_mention_count: 0, has_testimonials_page: false, testimonial_count: 0, has_case_studies: false, case_study_count: 0, has_awards_section: false, awards_mentioned: [], has_client_logos: false },
-              freshness: { pages_older_than_6_months: 0, pages_older_than_12_months: 0, stale_critical_pages: [] },
-              summary: { total_pages_analyzed: normalizedPages.length, critical_issues: [], high_priority_issues: [], medium_priority_issues: [] },
-            };
-          }
-          
-          console.log(`📊 Crawl Analysis Complete:`);
-          console.log(`   🔴 Critical issues: ${crawlAnalysis.summary.critical_issues.length}`);
-          console.log(`   🟠 High priority: ${crawlAnalysis.summary.high_priority_issues.length}`);
-          console.log(`   🟡 Medium priority: ${crawlAnalysis.summary.medium_priority_issues.length}`);
-          
-          // Extract structured ground truth for hallucination detection
-          let structuredGroundTruth;
-          try {
-            structuredGroundTruth = await extractGroundTruthData(
-              normalizedPages.map(p => ({
-                url: p.url,
-                title: p.title || p.url,
-                markdown: p.markdown || "",
-              }))
-            );
-          } catch (extractError) {
-            console.warn(`⚠️ Could not extract structured ground truth: ${extractError}`);
-            structuredGroundTruth = {};
-          }
-          
-          // Extract basic ground truth
-          const groundTruth = extractGroundTruth(normalizedPages);
-          
-          // Store crawled pages
-          const pagesToInsert = normalizedPages.map(page => ({
-            crawl_job_id: null,
-            brand_id,
-            url: page.url,
-            title: page.title || null,
-            description: page.description || null,
-            content_markdown: page.markdown || null,
-            content_excerpt: page.markdown?.slice(0, 500) || null,
-            word_count: page.markdown?.split(/\s+/).length || 0,
-            links_count: page.links?.length || 0,
-            crawled_at: page.crawledAt,
-          }));
-          
-          // Delete old crawled pages for this brand
-          await supabase
-            .from("crawled_pages")
-            .delete()
-            .eq("brand_id", brand_id);
-          
-          // Insert new pages
-          if (pagesToInsert.length > 0) {
-            await supabase.from("crawled_pages").insert(pagesToInsert);
-          }
-          
-          // Update brand with comprehensive ground truth INCLUDING crawl analysis
-          const groundTruthSummary = {
-            total_pages: normalizedPages.length,
-            key_pages: groundTruth.keyPages.slice(0, 10),
-            crawled_at: new Date().toISOString(),
-            structured_data: {
-              pricing: structuredGroundTruth.pricing,
-              features: structuredGroundTruth.features,
-              products: structuredGroundTruth.products,
-              services: structuredGroundTruth.services,
-              company_description: structuredGroundTruth.company_description,
-              tagline: structuredGroundTruth.tagline,
-              locations: structuredGroundTruth.locations,
-            },
-            // THE KEY: Full crawl analysis for Actionable Recommendations
-            crawl_analysis: crawlAnalysis,
-          };
-          
-          await supabase
-            .from("brands")
-            .update({
-              ground_truth_summary: groundTruthSummary,
-              last_crawled_at: new Date().toISOString(),
-            })
-            .eq("id", brand_id);
-          
-          console.log(`✓ Ground truth saved for ${brand.name}`);
-          crawlSuccessful = true;
-          break; // Exit retry loop on success
-          
-        } catch (crawlError) {
-          console.warn(`⚠️ Attempt ${attempt}: Error: ${crawlError}`);
-          if (attempt === 2) {
-            console.error(`❌ All attempts failed. Actionable Recommendations will be EMPTY.`);
-          }
-        }
-      }
+      // Fire and forget - don't await
+      tasks.trigger("crawl-brand-website", {
+        brand_id,
+        crawl_job_id: null, // Will be created by the job
+        start_url: startUrl,
+        max_pages: 20,
+        max_depth: 2,
+        include_paths: [],
+        exclude_paths: [],
+      }).catch(err => console.warn(`Background crawl trigger failed: ${err}`));
       
-      await supabase
-        .from("analysis_batches")
-        .update({ error_message: crawlSuccessful ? null : "Crawl failed - only suggestions available" })
-        .eq("id", batchId);
-        
+      console.log(`   ✓ Crawl triggered in background, continuing with simulations...`);
     } else {
       console.log(`✓ Using existing crawl data from ${brand.last_crawled_at}`);
     }
-    
-    if (!crawlSuccessful) {
-      console.log(`\n═══════════════════════════════════════════════════════════`);
-      console.log(`⚠️ WARNING: No crawl data available`);
-      console.log(`   - "Actionable Recommendations" section will be EMPTY`);
-      console.log(`   - Only "Suggested Recommendations" (generic) will be shown`);
-      console.log(`═══════════════════════════════════════════════════════════\n`);
-    }
 
-    console.log(`Processing ${prompts.length} prompts x ${engines.length} engines = ${totalSimulations} simulations`);
+    // ═══════════════════════════════════════════════════════════════
+    // 5. RUN ALL SIMULATIONS IN PARALLEL
+    // ═══════════════════════════════════════════════════════════════
+    // This is the key optimization - all prompt/engine combinations
+    // run simultaneously using Trigger.dev's batchTriggerAndWait
+    // ═══════════════════════════════════════════════════════════════
 
-    // 4. Import and run the check-prompt-visibility task
+    console.log(`🚀 Running ${prompts.length} prompts x ${engines.length} engines = ${totalSimulations} simulations IN PARALLEL`);
+
+    // 5.1 Import the child task
     const { checkPromptVisibility } = await import("./check-prompt-visibility");
     
-    let completedCount = 0;
-    const errors: string[] = [];
-
-    // 5. Process each prompt/engine combination
+    // 5.2 Build all simulation payloads
+    const simulationPayloads = [];
     for (const prompt of prompts) {
       for (const engine of engines as SupportedEngine[]) {
-        try {
-          console.log(`Processing: "${prompt.text}" on ${engine}`);
-
-          // Trigger and WAIT for the child task to complete
-          const result = await checkPromptVisibility.triggerAndWait({
+        simulationPayloads.push({
+          payload: {
             brand_id,
             prompt_id: prompt.id,
             keyword_id: prompt.id, // For backwards compatibility
@@ -390,30 +223,47 @@ export const runKeywordSetAnalysis = task({
             region,
             enable_hallucination_watchdog,
             simulation_mode: simulation_mode as SimulationMode,
-          });
-
-          if (result.ok) {
-            completedCount++;
-            console.log(`✓ Completed: "${prompt.text}" on ${engine} - visible: ${result.output?.is_visible}`);
-          } else {
-            errors.push(`${prompt.text} (${engine}): ${result.error}`);
-            console.error(`✗ Failed: "${prompt.text}" on ${engine}:`, result.error);
-          }
-
-          // Update batch progress
-          await supabase
-            .from("analysis_batches")
-            .update({ completed_simulations: completedCount })
-            .eq("id", batchId);
-
-        } catch (error) {
-          const errorMsg = error instanceof Error ? error.message : String(error);
-          errors.push(`${prompt.text} (${engine}): ${errorMsg}`);
-          console.error(`✗ Error: "${prompt.text}" on ${engine}:`, error);
-          completedCount++; // Count as completed (failed) for progress
-        }
+          },
+        });
       }
     }
+
+    console.log(`   📦 Created ${simulationPayloads.length} parallel simulation tasks`);
+
+    // 5.3 Execute ALL simulations in parallel using batchTriggerAndWait
+    // Trigger.dev handles concurrency and queuing internally
+    const startTime = Date.now();
+    const batchResult = await checkPromptVisibility.batchTriggerAndWait(simulationPayloads);
+    const parallelDuration = Date.now() - startTime;
+    
+    // Extract runs array from batch result
+    const results = batchResult.runs || [];
+    console.log(`   ⚡ All ${results.length} simulations completed in ${Math.round(parallelDuration / 1000)}s`);
+
+    // 5.4 Process results
+    let completedCount = 0;
+    const errors: string[] = [];
+
+    for (let i = 0; i < results.length; i++) {
+      const result = results[i];
+      const payload = simulationPayloads[i].payload;
+      const promptText = prompts.find(p => p.id === payload.prompt_id)?.text || payload.prompt_id;
+
+      if (result.ok) {
+        completedCount++;
+        console.log(`   ✓ ${payload.engine}: "${promptText.slice(0, 40)}..." - visible: ${result.output?.is_visible}`);
+      } else {
+        errors.push(`${promptText} (${payload.engine}): ${result.error}`);
+        console.error(`   ✗ ${payload.engine}: "${promptText.slice(0, 40)}..." - ${result.error}`);
+        completedCount++; // Count as completed (failed) for progress
+      }
+    }
+
+    // 5.5 Update final batch progress
+    await supabase
+      .from("analysis_batches")
+      .update({ completed_simulations: completedCount })
+      .eq("id", batchId);
 
     // 6. Mark batch as complete
     const finalStatus = errors.length === totalSimulations ? "failed" : "completed";
@@ -428,13 +278,21 @@ export const runKeywordSetAnalysis = task({
       })
       .eq("id", batchId);
 
-    console.log(`Batch ${batchId} completed. Status: ${finalStatus}, Completed: ${completedCount}/${totalSimulations}`);
+    const avgTimePerSim = Math.round(parallelDuration / totalSimulations);
+    console.log(`\n═══════════════════════════════════════════════════════════`);
+    console.log(`✓ Batch ${batchId} COMPLETED`);
+    console.log(`  Total time: ${Math.round(parallelDuration / 1000)}s (${avgTimePerSim}ms avg per simulation)`);
+    console.log(`  Simulations: ${completedCount}/${totalSimulations} (${errors.length} errors)`);
+    console.log(`  Status: ${finalStatus}`);
+    console.log(`═══════════════════════════════════════════════════════════\n`);
 
     return {
       batch_id: batchId,
       total_simulations: totalSimulations,
       completed: completedCount,
       errors: errors.length,
+      duration_ms: parallelDuration,
+      avg_time_per_simulation_ms: avgTimePerSim,
     };
   },
 });

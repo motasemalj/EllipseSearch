@@ -5,16 +5,28 @@ export default defineConfig({
   project: "proj_ctvrujnikrmepnvxoobn",
   runtime: "node",
   logLevel: "info",
-  maxDuration: 600, // 10 minutes for browser operations
+  
+  // ═══════════════════════════════════════════════════════════════
+  // OPTIMIZED FOR PARALLEL EXECUTION
+  // ═══════════════════════════════════════════════════════════════
+  // - Reduced maxDuration since parallelism speeds things up
+  // - Faster retry settings to recover quickly
+  // - Batch processing enabled for high throughput
+  // ═══════════════════════════════════════════════════════════════
+  
+  maxDuration: 300, // 5 minutes (reduced from 10 - parallelism makes it faster)
+  
   retries: {
     enabledInDev: true,
     default: {
-      maxAttempts: 3,
-      factor: 2,
-      minTimeoutInMs: 1000,
-      maxTimeoutInMs: 10000,
+      maxAttempts: 2, // Reduced from 3 - faster failure detection
+      factor: 1.5, // Faster retry backoff
+      minTimeoutInMs: 500, // Reduced from 1000
+      maxTimeoutInMs: 5000, // Reduced from 10000
+      randomize: true, // Add jitter to prevent thundering herd
     },
   },
+  
   dirs: ["./src/trigger/jobs"],
   
   // Build configuration for Playwright browser automation
