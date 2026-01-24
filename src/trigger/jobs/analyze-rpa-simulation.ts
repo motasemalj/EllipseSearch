@@ -169,8 +169,11 @@ export const analyzeRpaSimulation = task({
       console.log(`[RPA Analysis] GPT analysis complete: visible=${selectionSignals.is_visible}, sentiment=${selectionSignals.sentiment}`);
       
       // 3.6 Hallucination Watchdog (if enabled)
-      const enableHallucinationWatchdog = (simulation.selection_signals as { hallucination_watchdog?: { enabled?: boolean } } | null)
-        ?.hallucination_watchdog?.enabled === true;
+      const storedSelectionSignals = simulation.selection_signals as { hallucination_watchdog?: { enabled?: boolean } } | null;
+      const enableHallucinationWatchdog = storedSelectionSignals?.hallucination_watchdog?.enabled === true;
+      
+      // Log the flag value explicitly for debugging
+      console.log(`[RPA Analysis] 🐕 Hallucination Watchdog: stored=${JSON.stringify(storedSelectionSignals?.hallucination_watchdog)}, enabled=${enableHallucinationWatchdog}`);
 
       let groundTruthContent: string | undefined;
       let structuredGroundTruth: GroundTruthData | undefined;

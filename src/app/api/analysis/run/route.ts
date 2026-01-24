@@ -41,6 +41,7 @@ export async function POST(request: NextRequest) {
       language,
       region = "global", // Default to global if not specified
       enable_hallucination_watchdog,
+      simulation_mode, // Optional: 'api' to force API mode for ChatGPT
       schedule, // New: schedule frequency for recurring analysis
     } = body as {
       brand_id: string;
@@ -51,19 +52,31 @@ export async function POST(request: NextRequest) {
       language: SupportedLanguage;
       region?: SupportedRegion;
       enable_hallucination_watchdog?: boolean;
+      simulation_mode?: 'api' | 'rpa' | 'hybrid';
       schedule?: 'daily' | 'weekly' | 'biweekly' | 'monthly';
     };
+    
+    // Log what we received
+    console.log(`[Analysis API] Request: engines=${engines.join(",")}, hallucination_watchdog=${enable_hallucination_watchdog}, simulation_mode=${simulation_mode}`);
     
     // ═══════════════════════════════════════════════════════════════
     // ENGINE ROUTING - RPA is DEFAULT for ChatGPT, API fallback if offline
     // ═══════════════════════════════════════════════════════════════
     // ChatGPT uses RPA (real browser) by default for best quality
     // Falls back to API mode automatically if RPA worker is offline
+    // User can force API mode by passing simulation_mode: 'api'
     // Other engines (Gemini, Perplexity, Grok) always use API mode
     // ═══════════════════════════════════════════════════════════════
     
-    const rpaStatus = await isRpaAvailable();
-    const rpaAvailableForChatGPT = rpaStatus.available && rpaStatus.engines.includes('chatgpt');
+    // If user explicitly requested API mode, skip RPA check
+    const forceApiMode = simulation_mode === 'api';
+    
+    let rpaStatus = { available: false, workerCount: 0, engines: [] as string[] };
+    if (!forceApiMode) {
+      rpaStatus = await isRpaAvailable();
+    }
+    
+    const rpaAvailableForChatGPT = !forceApiMode && rpaStatus.available && rpaStatus.engines.includes('chatgpt');
     
     // Split engines into RPA (ChatGPT if available) and API (others + ChatGPT fallback)
     const rpaEngines: SupportedEngine[] = [];
@@ -71,13 +84,17 @@ export async function POST(request: NextRequest) {
     
     for (const engine of engines) {
       if (engine === 'chatgpt') {
-        if (rpaAvailableForChatGPT) {
+        if (forceApiMode) {
+          // User explicitly requested API mode
+          apiEngines.push(engine);
+          console.log(`[Analysis API] ChatGPT using API mode (user requested simulation_mode: api)`);
+        } else if (rpaAvailableForChatGPT) {
           // RPA worker is online - use RPA for best quality
           rpaEngines.push(engine);
         } else {
           // RPA worker offline - fallback to API mode
           apiEngines.push(engine);
-          console.log(`[Analysis API] ⚠️ ChatGPT falling back to API mode (RPA worker offline)`);
+          console.log(`[Analysis API] ⚠️ ChatGPT falling back to API mode (RPA worker offline: ${rpaStatus.workerCount} workers)`);
         }
       } else {
         // All other engines use API mode
@@ -85,7 +102,7 @@ export async function POST(request: NextRequest) {
       }
     }
     
-    console.log(`[Analysis API] Engine routing:`);
+    console.log(`[Analysis API] Engine routing (${engines.length} total):`);
     if (rpaEngines.length > 0) {
       console.log(`  ✓ RPA (real browser): ${rpaEngines.join(", ")}`);
     }

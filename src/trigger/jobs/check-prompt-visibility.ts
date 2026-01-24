@@ -499,8 +499,11 @@ export const checkPromptVisibility = task({
       // 9.5 HALLUCINATION WATCHDOG (Pro+ Feature) - Only run when enabled
       let hallucinationResult: HallucinationResult | undefined;
       
+      // Log the flag value explicitly for debugging
+      console.log(`🐕 Hallucination Watchdog: enabled=${enable_hallucination_watchdog}, hasGroundTruth=${!!structuredGroundTruth}`);
+      
       if (enable_hallucination_watchdog && structuredGroundTruth) {
-        console.log(`🐕 Hallucination Watchdog ENABLED - Running detection with structured ground truth...`);
+        console.log(`🐕 Hallucination Watchdog RUNNING - Starting detection...`);
         
         // Full AI-powered hallucination detection
         hallucinationResult = await detectHallucinations(
