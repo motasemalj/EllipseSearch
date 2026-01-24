@@ -54,19 +54,33 @@ export async function POST(request: NextRequest) {
       schedule?: 'daily' | 'weekly' | 'biweekly' | 'monthly';
     };
     
-    // RPA is used ONLY for ChatGPT (best anti-bot protection needed)
-    // Other engines (Gemini, Perplexity, Grok) use API mode
+    // ═══════════════════════════════════════════════════════════════
+    // ENGINE ROUTING - RPA is DEFAULT for ChatGPT, API fallback if offline
+    // ═══════════════════════════════════════════════════════════════
+    // ChatGPT uses RPA (real browser) by default for best quality
+    // Falls back to API mode automatically if RPA worker is offline
+    // Other engines (Gemini, Perplexity, Grok) always use API mode
+    // ═══════════════════════════════════════════════════════════════
+    
     const rpaStatus = await isRpaAvailable();
     const rpaAvailableForChatGPT = rpaStatus.available && rpaStatus.engines.includes('chatgpt');
     
-    // Split engines into RPA (ChatGPT) and API (others)
+    // Split engines into RPA (ChatGPT if available) and API (others + ChatGPT fallback)
     const rpaEngines: SupportedEngine[] = [];
     const apiEngines: SupportedEngine[] = [];
     
     for (const engine of engines) {
-      if (engine === 'chatgpt' && rpaAvailableForChatGPT) {
-        rpaEngines.push(engine);
+      if (engine === 'chatgpt') {
+        if (rpaAvailableForChatGPT) {
+          // RPA worker is online - use RPA for best quality
+          rpaEngines.push(engine);
+        } else {
+          // RPA worker offline - fallback to API mode
+          apiEngines.push(engine);
+          console.log(`[Analysis API] ⚠️ ChatGPT falling back to API mode (RPA worker offline)`);
+        }
       } else {
+        // All other engines use API mode
         apiEngines.push(engine);
       }
     }
@@ -77,9 +91,6 @@ export async function POST(request: NextRequest) {
     }
     if (apiEngines.length > 0) {
       console.log(`  ✓ API mode: ${apiEngines.join(", ")}`);
-    }
-    if (engines.includes('chatgpt') && !rpaAvailableForChatGPT) {
-      console.log(`  ⚠️ ChatGPT will use API (RPA worker not available)`);
     }
 
     // Use prompt_set_id if provided, fall back to keyword_set_id for backwards compatibility

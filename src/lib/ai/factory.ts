@@ -566,8 +566,10 @@ async function runGrokSimulation(
   console.log(`[Grok] Searching with web + X search: "${keyword}" (region: ${region})`);
 
   // Request with both web_search and x_search tools enabled
+  // Using grok-beta as the most widely accessible model
+  // grok-2-latest may require special team access
   const response = await xai.chat.completions.create({
-    model: "grok-2-latest",
+    model: "grok-beta",
     messages: [
       {
         role: "system",
