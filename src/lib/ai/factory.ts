@@ -605,7 +605,7 @@ Format citations as: [Source Title](URL) or mention the source domain inline.`,
 
   // Extract response content
   const rawContent = response.choices[0]?.message?.content || "";
-  let content = cleanGrokResponse(rawContent);
+  const content = cleanGrokResponse(rawContent);
   
   // Log if we had to clean function call metadata
   if (rawContent !== content) {
