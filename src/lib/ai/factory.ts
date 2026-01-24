@@ -566,10 +566,9 @@ async function runGrokSimulation(
   console.log(`[Grok] Searching with web + X search: "${keyword}" (region: ${region})`);
 
   // Request with both web_search and x_search tools enabled
-  // Using grok-beta as the most widely accessible model
-  // grok-2-latest may require special team access
+  // Using grok-4-1-fast-reasoning for fast, high-quality responses
   const response = await xai.chat.completions.create({
-    model: "grok-beta",
+    model: "grok-4-1-fast-reasoning",
     messages: [
       {
         role: "system",
