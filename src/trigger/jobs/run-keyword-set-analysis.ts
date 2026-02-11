@@ -71,7 +71,7 @@ export const runKeywordSetAnalysis = task({
         // RPA is online - use it for ALL engines that it supports
         const requestedEngines = new Set(engines);
         const rpaEngines = new Set(rpaStatus.engines);
-        const allEnginesSupported = [...requestedEngines].every(e => rpaEngines.has(e));
+        const allEnginesSupported = Array.from(requestedEngines).every(e => rpaEngines.has(e));
         
         if (allEnginesSupported) {
           simulation_mode = 'rpa';
@@ -79,9 +79,9 @@ export const runKeywordSetAnalysis = task({
           console.log(`   → Using RPA mode for ALL ${engines.length} engines`);
         } else {
           // Some engines not supported by RPA - log warning but still use RPA for supported ones
-          const unsupportedEngines = [...requestedEngines].filter(e => !rpaEngines.has(e));
+          const unsupportedEngines = Array.from(requestedEngines).filter(e => !rpaEngines.has(e));
           console.log(`⚠️ RPA is online but doesn't support: ${unsupportedEngines.join(', ')}`);
-          console.log(`   → Using RPA for: ${[...requestedEngines].filter(e => rpaEngines.has(e)).join(', ')}`);
+          console.log(`   → Using RPA for: ${Array.from(requestedEngines).filter(e => rpaEngines.has(e)).join(', ')}`);
           simulation_mode = 'rpa'; // Still use RPA, check-prompt-visibility will fallback per-engine if needed
         }
       } else {

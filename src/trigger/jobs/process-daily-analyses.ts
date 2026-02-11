@@ -250,7 +250,6 @@ export const processDailyAnalysisSlot = task({
       brand_id,
       brand_name,
       engines,
-      prompt_count,
       total_simulations,
     } = payload;
     

@@ -584,6 +584,7 @@ function SimulationCard({
   brandAliases,
   userTier,
 }: {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   simulation: any;
   index?: number;
   brandName: string;
@@ -916,7 +917,6 @@ function SimulationCard({
               const safeBrandName = brandName || "";
               const safeBrandDomain = brandDomain || "";
               const brandCore = safeBrandDomain.replace(/^www\./, "").split(".")[0];
-              const terms = simulation.is_visible ? [safeBrandName, safeBrandDomain, brandCore] : [];
               const html = simulation.ai_response_html || textToSafeHtml(simulation.response_text || "");
               const localAliases = (brandAliases || []).filter(Boolean);
 
@@ -930,7 +930,7 @@ function SimulationCard({
                     safeBrandDomain,
                     brandCore,
                     ...(localAliases.slice(0, 10)),
-                    ...(((signals?.brand_mentions as string[]) || []).slice(0, 10)),
+                    ...(((signals?.brand_mentions as unknown as string[]) || []).slice(0, 10)),
                   ]}
                 />
               );

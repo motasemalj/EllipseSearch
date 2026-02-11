@@ -482,8 +482,8 @@ IMPORTANT:
         severity: string;
         claim: string;
         reality: string;
-        affected_element?: string;
-        specific_fix?: string;
+        affected_element?: string | null;
+        specific_fix?: string | null;
       }) => ({
         type: h.type as DetectedHallucination["type"],
         severity: h.severity as DetectedHallucination["severity"],
@@ -592,8 +592,8 @@ function generateEnhancedRecommendation(
     severity: string;
     claim: string;
     reality: string;
-    affected_element?: string;
-    specific_fix?: string;
+    affected_element?: string | null;
+    specific_fix?: string | null;
   },
   brandName: string,
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
