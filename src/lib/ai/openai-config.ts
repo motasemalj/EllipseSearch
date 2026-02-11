@@ -11,10 +11,9 @@ export const OPENAI_CHAT_MODEL =
   "gpt-5-nano";
 
 // Model used specifically for "ChatGPT" engine simulation (aims to match ChatGPT output)
-// o3-deep-research provides comprehensive research and resource gathering capabilities
 export const OPENAI_CHATGPT_SIM_MODEL =
   process.env.OPENAI_CHATGPT_SIM_MODEL ||
-  "o3-deep-research";
+  "gpt-5-nano";
 
 // ===========================================
 // Reasoning Effort Configuration
