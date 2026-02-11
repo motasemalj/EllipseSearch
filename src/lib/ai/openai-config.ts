@@ -1,15 +1,58 @@
+// ===========================================
+// OpenAI Model Configuration
+// ===========================================
+
 // Model used for all analysis, reasoning, and classification tasks
-// gpt-4o-mini provides excellent reasoning at lower cost
-// IMPORTANT: Use a valid OpenAI model name (gpt-4o-mini, gpt-4-turbo, gpt-4o, etc.)
+// gpt-5-nano provides excellent reasoning at lower cost
+// IMPORTANT: Use a valid OpenAI model name (gpt-5-nano, gpt-4o-mini, gpt-4o, etc.)
 export const OPENAI_CHAT_MODEL =
   process.env.OPENAI_CHAT_MODEL ||
   process.env.OPENAI_MODEL ||
-  "gpt-4o-mini"; // Changed from invalid "gpt-5-mini" to valid "gpt-4o-mini"
+  "gpt-5-nano";
 
 // Model used specifically for "ChatGPT" engine simulation (aims to match ChatGPT output)
+// o3-deep-research provides comprehensive research and resource gathering capabilities
 export const OPENAI_CHATGPT_SIM_MODEL =
   process.env.OPENAI_CHATGPT_SIM_MODEL ||
-  "gpt-4o-mini"; // Changed from invalid "gpt-5-mini" to valid "gpt-4o-mini"
+  "o3-deep-research";
+
+// ===========================================
+// Reasoning Effort Configuration
+// ===========================================
+
+/**
+ * Reasoning effort levels affect response quality, latency, and cost:
+ * - "low": Fast, cheap, suitable for simple classification
+ * - "medium": Balanced, good for most tasks (default for simulation)
+ * - "high": Best quality, slower and more expensive (for accuracy-critical analysis)
+ */
+export type ReasoningEffort = "low" | "medium" | "high";
+
+/**
+ * Reasoning effort for ChatGPT simulation.
+ * "medium" provides good balance between accuracy and speed.
+ * Set to "high" for maximum fidelity to real ChatGPT reasoning.
+ */
+export const CHATGPT_SIMULATION_REASONING_EFFORT: ReasoningEffort =
+  (process.env.CHATGPT_SIMULATION_REASONING_EFFORT || "medium") as ReasoningEffort;
+
+/**
+ * Reasoning effort for analysis tasks (brand extraction, sentiment, hallucination detection).
+ * "high" recommended for production to maximize accuracy.
+ */
+export const ANALYSIS_REASONING_EFFORT: ReasoningEffort =
+  (process.env.ANALYSIS_REASONING_EFFORT || "high") as ReasoningEffort;
+
+/**
+ * Reasoning effort for scoring tasks (AEO scoring, entity confidence).
+ * "medium" is usually sufficient.
+ */
+export const SCORING_REASONING_EFFORT: ReasoningEffort =
+  (process.env.SCORING_REASONING_EFFORT || "medium") as ReasoningEffort;
+
+// ===========================================
+// Web Search Configuration
+// ===========================================
 
 // Whether the ChatGPT simulator is allowed to use live web search tooling.
 // Default ON for production parity with real ChatGPT browsing behavior.
@@ -28,6 +71,10 @@ export const CHATGPT_SIM_ENABLE_WEB_SEARCH =
 export type SimulationMode = "live" | "stable";
 export const CHATGPT_SIM_MODE: SimulationMode = 
   (process.env.CHATGPT_SIM_MODE || "live") as SimulationMode;
+
+// ===========================================
+// Browser Simulation Configuration
+// ===========================================
 
 /**
  * Browser Simulation Mode:
@@ -62,13 +109,27 @@ export const DEFAULT_BROWSER_SIMULATION_MODE: BrowserSimulationMode =
 export const BROWSER_MODE_ENABLED =
   (process.env.BROWSER_MODE_ENABLED || "true").toLowerCase() === "true";
 
+// ===========================================
+// Ensemble Configuration
+// ===========================================
+
 /**
  * Number of ensemble runs per simulation.
  * Higher = better recall but more expensive.
  * Recommended: 5-9 runs for production, 1 for testing.
  */
 export const ENSEMBLE_RUN_COUNT = 
-  parseInt(process.env.ENSEMBLE_RUN_COUNT || "5", 10);
+  parseInt(process.env.ENSEMBLE_RUN_COUNT || "1", 10);
+
+/**
+ * Minimum ensemble runs (user cannot set below this)
+ */
+export const MIN_ENSEMBLE_RUNS = 1;
+
+/**
+ * Maximum ensemble runs (user cannot set above this)
+ */
+export const MAX_ENSEMBLE_RUNS = 15;
 
 /**
  * Confidence thresholds for brand presence classification.
@@ -81,4 +142,25 @@ export const BRAND_CONFIDENCE_THRESHOLDS = {
   likely_absent: 0,        // Brand appears in 0% of runs
 } as const;
 
+// ===========================================
+// Caching Configuration
+// ===========================================
 
+/**
+ * Whether to cache simulation results for identical queries.
+ * Reduces API costs but may miss real-time changes.
+ */
+export const ENABLE_SIMULATION_CACHE =
+  (process.env.ENABLE_SIMULATION_CACHE || "true").toLowerCase() === "true";
+
+/**
+ * Cache TTL in milliseconds (default: 1 hour)
+ */
+export const SIMULATION_CACHE_TTL_MS =
+  parseInt(process.env.SIMULATION_CACHE_TTL_MS || String(60 * 60 * 1000), 10);
+
+/**
+ * Maximum cache entries
+ */
+export const SIMULATION_CACHE_MAX_SIZE =
+  parseInt(process.env.SIMULATION_CACHE_MAX_SIZE || "1000", 10);

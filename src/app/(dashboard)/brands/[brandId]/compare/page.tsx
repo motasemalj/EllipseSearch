@@ -163,6 +163,25 @@ export default async function ComparePage({
     { aTotal: number; aVisible: number; bTotal: number; bVisible: number }
   > = {};
 
+  // Build matrix data: prompt -> engine -> visibility results
+  const matrixData: Record<string, {
+    promptId: string;
+    promptText: string;
+    group: "a" | "b";
+    engines: Record<SupportedEngine, { visible: number; total: number; pct: number }>;
+  }> = {};
+
+  // Initialize matrix data for each prompt
+  Array.from(promptIdToGroup.entries()).forEach(([promptId, group]) => {
+    const promptInfo = prompts?.find(p => p.id === promptId);
+    matrixData[promptId] = {
+      promptId,
+      promptText: promptInfo?.text || "Unknown Prompt",
+      group,
+      engines: Object.fromEntries(ENGINES.map(e => [e, { visible: 0, total: 0, pct: 0 }])) as Record<SupportedEngine, { visible: number; total: number; pct: number }>,
+    };
+  });
+
   for (const sim of simulations || []) {
     const group = promptIdToGroup.get(sim.prompt_id as string);
     if (!group) continue;
@@ -178,6 +197,12 @@ export default async function ComparePage({
     const r = Number(gap?.directness_score ?? 0);
 
     if (!trendAgg[dateKey]) trendAgg[dateKey] = { aTotal: 0, aVisible: 0, bTotal: 0, bVisible: 0 };
+
+    // Update matrix data
+    if (matrixData[sim.prompt_id as string]) {
+      matrixData[sim.prompt_id as string].engines[engine].total++;
+      if (isVisible) matrixData[sim.prompt_id as string].engines[engine].visible++;
+    }
 
     if (group === "a") {
       statsA.total++;
@@ -209,6 +234,14 @@ export default async function ComparePage({
 
       trendAgg[dateKey].bTotal++;
       if (isVisible) trendAgg[dateKey].bVisible++;
+    }
+  }
+
+  // Calculate percentages for matrix
+  for (const promptId of Object.keys(matrixData)) {
+    for (const engine of ENGINES) {
+      const data = matrixData[promptId].engines[engine];
+      data.pct = data.total > 0 ? clampPct((data.visible / data.total) * 100) : 0;
     }
   }
 
@@ -261,6 +294,14 @@ export default async function ComparePage({
   const aLabel = requestedMode === "sets" ? setName(aId) : promptLabel(aId);
   const bLabel = requestedMode === "sets" ? setName(bId) : promptLabel(bId);
 
+  // Convert matrix data to array format
+  const matrixArray = Object.values(matrixData).map(item => ({
+    promptId: item.promptId,
+    promptText: item.promptText,
+    group: item.group,
+    engines: item.engines,
+  }));
+
   return (
     <CompareView
       payload={{
@@ -274,6 +315,7 @@ export default async function ComparePage({
         label: { a: aLabel, b: bLabel },
         stats: { a: statsA, b: statsB },
         charts: { byEngine, trend },
+        matrix: matrixArray,
       }}
     />
   );

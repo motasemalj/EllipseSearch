@@ -17,10 +17,11 @@
  * Supports both prompt sets AND individual prompts.
  */
 
-import { task, tasks } from "@trigger.dev/sdk/v3";
+import { task } from "@trigger.dev/sdk/v3";
 import { createClient } from "@supabase/supabase-js";
 import type { SupportedEngine, RunAnalysisInput, SimulationMode } from "@/types";
 import { DEFAULT_BROWSER_SIMULATION_MODE } from "@/lib/ai/openai-config";
+import { isRpaAvailable } from "@/lib/rpa/status";
 
 // Create Supabase client with service role for job access
 function getSupabase() {
@@ -43,7 +44,7 @@ export const runKeywordSetAnalysis = task({
     concurrencyLimit: 5, // Max 5 analysis batches running at once
   },
 
-  run: async (payload: RunAnalysisInput) => {
+  run: async (payload: RunAnalysisInput, { ctx }) => {
     // Support both prompt_set_id (new) and keyword_set_id (legacy)
     const prompt_set_id = payload.prompt_set_id;
     const prompt_ids = payload.prompt_ids;
@@ -53,11 +54,48 @@ export const runKeywordSetAnalysis = task({
       language, 
       region = "global", 
       enable_hallucination_watchdog,
-      simulation_mode = DEFAULT_BROWSER_SIMULATION_MODE,
+      simulation_mode: requestedMode = DEFAULT_BROWSER_SIMULATION_MODE,
+      ensemble_run_count,
+      enable_variance_metrics,
     } = payload;
     
-    // Log simulation mode
-    const modeLabel = simulation_mode === 'api' ? 'API' : simulation_mode === 'browser' ? 'Browser (Playwright)' : 'Hybrid';
+    // IMPORTANT: Check RPA availability FIRST
+    // If RPA is online, ALL AI response generations should go through RPA
+    // API is only a fallback when RPA is offline
+    let simulation_mode: SimulationMode = requestedMode as SimulationMode;
+    
+    try {
+      const rpaStatus = await isRpaAvailable();
+      
+      if (rpaStatus.available && rpaStatus.workerCount > 0) {
+        // RPA is online - use it for ALL engines that it supports
+        const requestedEngines = new Set(engines);
+        const rpaEngines = new Set(rpaStatus.engines);
+        const allEnginesSupported = [...requestedEngines].every(e => rpaEngines.has(e));
+        
+        if (allEnginesSupported) {
+          simulation_mode = 'rpa';
+          console.log(`🤖 RPA is ONLINE (${rpaStatus.workerCount} worker(s), engines: ${rpaStatus.engines.join(', ')})`);
+          console.log(`   → Using RPA mode for ALL ${engines.length} engines`);
+        } else {
+          // Some engines not supported by RPA - log warning but still use RPA for supported ones
+          const unsupportedEngines = [...requestedEngines].filter(e => !rpaEngines.has(e));
+          console.log(`⚠️ RPA is online but doesn't support: ${unsupportedEngines.join(', ')}`);
+          console.log(`   → Using RPA for: ${[...requestedEngines].filter(e => rpaEngines.has(e)).join(', ')}`);
+          simulation_mode = 'rpa'; // Still use RPA, check-prompt-visibility will fallback per-engine if needed
+        }
+      } else {
+        console.log(`📡 RPA is OFFLINE - using API fallback mode`);
+        simulation_mode = 'api';
+      }
+    } catch (rpaCheckError) {
+      console.warn(`⚠️ Could not check RPA status: ${rpaCheckError instanceof Error ? rpaCheckError.message : 'Unknown error'}`);
+      console.log(`   → Using ${requestedMode} mode as fallback`);
+      simulation_mode = requestedMode as SimulationMode;
+    }
+    
+    // Log final simulation mode
+    const modeLabel = simulation_mode === 'api' ? 'API' : simulation_mode === 'browser' ? 'Browser (Playwright)' : simulation_mode === 'rpa' ? 'RPA' : 'Hybrid';
     console.log(`Analysis mode: ${modeLabel}`);
     const supabase = getSupabase();
 
@@ -149,7 +187,7 @@ export const runKeywordSetAnalysis = task({
     // 3. Fetch brand
     const { data: brand, error: brandError } = await supabase
       .from("brands")
-      .select("*, organizations(*)")
+      .select("id, domain, last_crawled_at")
       .eq("id", brand_id)
       .single();
 
@@ -162,36 +200,18 @@ export const runKeywordSetAnalysis = task({
     }
 
     // ═══════════════════════════════════════════════════════════════
-    // 4. FIRE CRAWL IN BACKGROUND (NON-BLOCKING)
+    // 4. CRAWL IS HANDLED BY ANALYSIS API (NOT HERE)
     // ═══════════════════════════════════════════════════════════════
-    // Crawl runs in parallel - simulations start IMMEDIATELY
-    // Crawl data will be used if available, otherwise generic recs
+    // Crawl is now triggered ONCE by the /api/analysis/run endpoint
+    // before this job runs. This prevents duplicate crawl triggers.
     // ═══════════════════════════════════════════════════════════════
     
     const needsCrawl = !brand.last_crawled_at || 
       (Date.now() - new Date(brand.last_crawled_at).getTime()) > CRAWL_FRESHNESS_HOURS * 60 * 60 * 1000;
     
     if (needsCrawl && brand.domain) {
-      console.log(`🕷️ Triggering background crawl for ${brand.domain} (non-blocking)`);
-      
-      // Ensure domain has protocol
-      let startUrl = brand.domain;
-      if (!startUrl.startsWith('http')) {
-        startUrl = `https://${startUrl}`;
-      }
-      
-      // Fire and forget - don't await
-      tasks.trigger("crawl-brand-website", {
-        brand_id,
-        crawl_job_id: null, // Will be created by the job
-        start_url: startUrl,
-        max_pages: 20,
-        max_depth: 2,
-        include_paths: [],
-        exclude_paths: [],
-      }).catch(err => console.warn(`Background crawl trigger failed: ${err}`));
-      
-      console.log(`   ✓ Crawl triggered in background, continuing with simulations...`);
+      console.log(`⚠️ Crawl data is stale for ${brand.domain} - should have been triggered by API`);
+      console.log(`   Continuing with simulations (crawl may be in progress from API)`);
     } else {
       console.log(`✓ Using existing crawl data from ${brand.last_crawled_at}`);
     }
@@ -207,15 +227,25 @@ export const runKeywordSetAnalysis = task({
 
     // 5.1 Import the child task
     const { checkPromptVisibility } = await import("./check-prompt-visibility");
+
+    // IMPORTANT: When using trigger()/batchTrigger() (non-wait), Trigger does NOT version-lock child runs.
+    // In dev mode this can lead to child runs stuck in PENDING_VERSION. Explicitly lock children to this run's version.
+    const childVersion = ctx.run.version ?? ctx.deployment?.version;
     
     // 5.2 Build all simulation payloads
     const simulationPayloads = [];
     for (const prompt of prompts) {
       for (const engine of engines as SupportedEngine[]) {
+        // Per-engine queue override to avoid stampeding one provider.
+        // NOTE: In SDK v4+ (even via the /v3 import path), queues must be defined ahead of time.
+        // We override by queue NAME here; concurrency is defined in `check-prompt-visibility.ts`.
+        const queueName = `sim-${engine}`;
+
         simulationPayloads.push({
           payload: {
             brand_id,
             prompt_id: prompt.id,
+            prompt_text: prompt.text,
             keyword_id: prompt.id, // For backwards compatibility
             analysis_batch_id: batchId,
             engine,
@@ -223,6 +253,14 @@ export const runKeywordSetAnalysis = task({
             region,
             enable_hallucination_watchdog,
             simulation_mode: simulation_mode as SimulationMode,
+            // Pass ensemble settings from UI (overrides env defaults)
+            ensemble_run_count,
+            enable_variance_metrics,
+          },
+          options: {
+            queue: queueName,
+            idempotencyKey: `sim-${batchId}-${prompt.id}-${engine}`,
+            ...(childVersion ? { version: childVersion } : {}),
           },
         });
       }
@@ -230,69 +268,33 @@ export const runKeywordSetAnalysis = task({
 
     console.log(`   📦 Created ${simulationPayloads.length} parallel simulation tasks`);
 
-    // 5.3 Execute ALL simulations in parallel using batchTriggerAndWait
-    // Trigger.dev handles concurrency and queuing internally
+    // 5.3 Execute ALL simulations in parallel using batchTrigger (non-blocking).
+    // We no longer wait in the parent task because waiting can cause "stuck" runs if any provider hangs.
+    // Each simulation run updates its own record + increments batch progress; finalization is debounced.
     const startTime = Date.now();
-    const batchResult = await checkPromptVisibility.batchTriggerAndWait(simulationPayloads);
-    const parallelDuration = Date.now() - startTime;
-    
-    // Extract runs array from batch result
-    const results = batchResult.runs || [];
-    console.log(`   ⚡ All ${results.length} simulations completed in ${Math.round(parallelDuration / 1000)}s`);
+    const batchHandle = await checkPromptVisibility.batchTrigger(simulationPayloads);
+    const triggerDuration = Date.now() - startTime;
 
-    // 5.4 Process results
-    let completedCount = 0;
-    const errors: string[] = [];
-
-    for (let i = 0; i < results.length; i++) {
-      const result = results[i];
-      const payload = simulationPayloads[i].payload;
-      const promptText = prompts.find(p => p.id === payload.prompt_id)?.text || payload.prompt_id;
-
-      if (result.ok) {
-        completedCount++;
-        console.log(`   ✓ ${payload.engine}: "${promptText.slice(0, 40)}..." - visible: ${result.output?.is_visible}`);
-      } else {
-        errors.push(`${promptText} (${payload.engine}): ${result.error}`);
-        console.error(`   ✗ ${payload.engine}: "${promptText.slice(0, 40)}..." - ${result.error}`);
-        completedCount++; // Count as completed (failed) for progress
-      }
-    }
-
-    // 5.5 Update final batch progress
-    await supabase
-      .from("analysis_batches")
-      .update({ completed_simulations: completedCount })
-      .eq("id", batchId);
-
-    // 6. Mark batch as complete
-    const finalStatus = errors.length === totalSimulations ? "failed" : "completed";
-    
     await supabase
       .from("analysis_batches")
       .update({
-        status: finalStatus,
-        completed_simulations: completedCount,
-        completed_at: new Date().toISOString(),
-        error_message: errors.length > 0 ? `${errors.length} errors: ${errors.slice(0, 3).join("; ")}` : null,
+        status: "processing",
+        error_message: null,
       })
       .eq("id", batchId);
 
-    const avgTimePerSim = Math.round(parallelDuration / totalSimulations);
-    console.log(`\n═══════════════════════════════════════════════════════════`);
-    console.log(`✓ Batch ${batchId} COMPLETED`);
-    console.log(`  Total time: ${Math.round(parallelDuration / 1000)}s (${avgTimePerSim}ms avg per simulation)`);
-    console.log(`  Simulations: ${completedCount}/${totalSimulations} (${errors.length} errors)`);
-    console.log(`  Status: ${finalStatus}`);
-    console.log(`═══════════════════════════════════════════════════════════\n`);
+    const triggerBatchId =
+      (batchHandle as unknown as { batchId?: string; id?: string })?.batchId ||
+      (batchHandle as unknown as { batchId?: string; id?: string })?.id ||
+      "unknown";
+    console.log(`   ⚡ Triggered ${simulationPayloads.length} simulation runs in ${Math.round(triggerDuration / 1000)}s (batch: ${triggerBatchId})`);
 
     return {
       batch_id: batchId,
       total_simulations: totalSimulations,
-      completed: completedCount,
-      errors: errors.length,
-      duration_ms: parallelDuration,
-      avg_time_per_simulation_ms: avgTimePerSim,
+      triggered: simulationPayloads.length,
+      trigger_batch_id: triggerBatchId,
+      duration_ms: triggerDuration,
     };
   },
 });

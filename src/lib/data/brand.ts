@@ -13,6 +13,12 @@ import {
 // Optimized with parallel fetching and request-level caching
 // =============================================================================
 
+export interface MarketShareData {
+  name: string;
+  mentions: number;
+  isBrand: boolean;
+}
+
 export interface BrandStats {
   totalSimulations: number;
   visibleSimulations: number;
@@ -28,6 +34,7 @@ export interface BrandStats {
     citations: number;
     urls: string[];
   }>;
+  marketShare: MarketShareData[];
 }
 
 export interface PromptWithStats {
@@ -49,15 +56,16 @@ export const getBrandPageData = cache(async (brandId: string, organizationId: st
   if (!brand) return null;
 
   // Fetch all other data in parallel
-  const [promptSets, prompts, simulations, recentBatches] = await Promise.all([
+  const [promptSets, prompts, simulations, recentBatches, autoAnalysisStatus] = await Promise.all([
     getCachedPromptSets(brandId),
     getCachedPrompts(brandId),
     getCachedBrandSimulations(brandId, 90),
     getRecentBatches(brandId),
+    getAutoAnalysisStatus(brandId),
   ]);
 
   // Process all data
-  const { promptsWithStats, stats, charts } = processBrandData(prompts, simulations);
+  const { promptsWithStats, stats, charts } = processBrandData(prompts, simulations, brand.name, brand.domain);
 
   return {
     brand,
@@ -66,8 +74,37 @@ export const getBrandPageData = cache(async (brandId: string, organizationId: st
     recentBatches,
     stats,
     charts,
+    autoAnalysisStatus,
   };
 });
+
+/**
+ * Get auto-analysis status for a brand
+ */
+async function getAutoAnalysisStatus(brandId: string): Promise<{ enabled: boolean; frequency: string | null }> {
+  const supabase = await getSupabaseClient();
+  const { data } = await supabase
+    .from("scheduled_analyses")
+    .select("id, is_active, frequency")
+    .eq("brand_id", brandId)
+    .eq("is_active", true)
+    .limit(1);
+  
+  if (data && data.length > 0) {
+    // Map frequency enum to display text
+    const frequencyMap: Record<string, string> = {
+      daily: "Daily",
+      weekly: "Weekly",
+      biweekly: "Bi-weekly",
+      monthly: "Monthly",
+    };
+    return { 
+      enabled: true, 
+      frequency: frequencyMap[data[0].frequency] || data[0].frequency || "Daily" 
+    };
+  }
+  return { enabled: false, frequency: null };
+}
 
 /**
  * Get recent batches for a brand
@@ -100,7 +137,9 @@ function processBrandData(
     is_visible: boolean;
     selection_signals: unknown;
     created_at: string;
-  }>
+  }>,
+  brandName?: string,
+  brandDomain?: string
 ) {
   // Calculate per-prompt stats
   const promptStats: Record<string, { total: number; visible: number }> = {};
@@ -120,6 +159,10 @@ function processBrandData(
   // Source tracking
   const sourceCounts: Record<string, number> = {};
   const sourceUrls: Record<string, Set<string>> = {};
+  
+  // Market share tracking - count mentions in AI responses
+  const competitorMentions: Record<string, number> = {};
+  let brandMentions = 0;
 
   // Daily stats for charts
   const byDay: Record<string, {
@@ -167,10 +210,44 @@ function processBrandData(
           sourceCounts[domain] = (sourceCounts[domain] || 0) + 1;
           if (!sourceUrls[domain]) sourceUrls[domain] = new Set();
           sourceUrls[domain].add(source);
+          
+          // Track competitor mentions from winning sources (for market share)
+          // Extract clean company name from domain
+          const cleanDomain = domain.replace(/^www\./, '').replace(/\.(com|org|net|io|co|ai)$/, '');
+          const isOwnBrand = brandDomain && (
+            domain.includes(brandDomain) || 
+            brandDomain.includes(cleanDomain) ||
+            (brandName && cleanDomain.toLowerCase().includes(brandName.toLowerCase()))
+          );
+          
+          if (!isOwnBrand) {
+            // Skip common non-competitor domains
+            const nonCompetitorPatterns = [
+              'google', 'youtube', 'wikipedia', 'reddit', 'twitter', 'facebook',
+              'linkedin', 'instagram', 'tiktok', 'amazon', 'yelp', 'tripadvisor',
+              'bbb', 'glassdoor', 'trustpilot', 'g2', 'capterra', 'clutch',
+              'medium', 'substack', 'forbes', 'bloomberg', 'techcrunch', 'reuters',
+              'nytimes', 'wsj', 'cnn', 'bbc', 'theguardian', 'huffpost',
+              'github', 'stackoverflow', 'quora', 'pinterest', 'tumblr'
+            ];
+            
+            const isNonCompetitor = nonCompetitorPatterns.some(p => cleanDomain.toLowerCase().includes(p));
+            
+            if (!isNonCompetitor && cleanDomain.length > 2) {
+              // Capitalize first letter for display
+              const displayName = cleanDomain.charAt(0).toUpperCase() + cleanDomain.slice(1);
+              competitorMentions[displayName] = (competitorMentions[displayName] || 0) + 1;
+            }
+          }
         } catch {
           // Invalid URL, skip
         }
       });
+      
+      // Track brand mentions
+      if (sim.is_visible) {
+        brandMentions++;
+      }
     }
 
     // Daily stats
@@ -267,6 +344,27 @@ function processBrandData(
     { name: "Grok", value: engineMixAgg.grok, color: "#6B7280" },
   ].filter((x) => x.value > 0);
 
+  // Build market share data
+  // Sort competitors by mentions and take top ones
+  const sortedCompetitors = Object.entries(competitorMentions)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 8); // Top 8 competitors
+  
+  const marketShare: MarketShareData[] = [
+    // Brand first (if there are any mentions)
+    ...(brandMentions > 0 ? [{
+      name: brandName || "Your Brand",
+      mentions: brandMentions,
+      isBrand: true,
+    }] : []),
+    // Then competitors
+    ...sortedCompetitors.map(([name, mentions]) => ({
+      name,
+      mentions,
+      isBrand: false,
+    })),
+  ];
+
   return {
     promptsWithStats,
     stats: {
@@ -276,6 +374,7 @@ function processBrandData(
       engineStats,
       topSources,
       topSourcesDetailed,
+      marketShare,
     },
     charts: { trend, volume, engineMix },
   };

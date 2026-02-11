@@ -23,13 +23,31 @@ export function SentimentAnalysisCard({
   brandMentioned = false,
 }: SentimentAnalysisCardProps) {
   // Calculate display values
-  const nss = data?.net_sentiment_score ?? (
-    simpleSentiment === "positive" ? 75 :
-    simpleSentiment === "negative" ? 25 : 50
-  );
+  // Handle both legacy (-1 to +1) and new (0 to 100) formats
+  const rawNss = data?.net_sentiment_score;
+  let nss: number;
+  
+  if (typeof rawNss === "number" && Number.isFinite(rawNss)) {
+    // If value is between -1 and 1, it's legacy format - convert to 0-100
+    if (rawNss >= -1 && rawNss <= 1) {
+      nss = Math.round(((rawNss + 1) / 2) * 100);
+    } else {
+      // Already in 0-100 format
+      nss = Math.round(rawNss);
+    }
+  } else {
+    // Fallback based on simple sentiment
+    nss = simpleSentiment === "positive" ? 75 :
+          simpleSentiment === "negative" ? 25 : 50;
+  }
+
+  // Guardrails: avoid displaying weird edge values from partial data
+  if (!Number.isFinite(nss) || nss < 0 || nss > 100) {
+    nss = 50;
+  }
   
   const label = data?.label || simpleSentiment || "neutral";
-  const polarity = data?.polarity ?? 0;
+  const polarity = data?.polarity;
   
   const getColor = (score: number) => {
     if (score >= 60) return { text: "text-green-500", bg: "bg-green-500", ring: "ring-green-500/30" };
@@ -41,8 +59,35 @@ export function SentimentAnalysisCard({
   
   const Icon = label === "positive" ? TrendingUp : label === "negative" ? TrendingDown : Minus;
 
-  // If brand not mentioned, show different state
+  // If brand is not mentioned, show a friendly message without scores
   if (!brandMentioned) {
+    return (
+      <div className="rounded-2xl border border-border bg-card p-6">
+        <div className="flex items-center gap-3 mb-4">
+          <div className="p-2 rounded-xl bg-blue-500/10">
+            <MessageSquare className="w-5 h-5 text-blue-500" />
+          </div>
+          <div>
+            <h3 className="font-semibold">Sentiment Analysis</h3>
+            <p className="text-sm text-muted-foreground">Brand visibility check</p>
+          </div>
+        </div>
+        <div className="text-center py-6 px-4">
+          <div className="w-12 h-12 rounded-full bg-muted/50 flex items-center justify-center mx-auto mb-3">
+            <AlertTriangle className="w-6 h-6 text-muted-foreground" />
+          </div>
+          <p className="text-lg font-medium text-foreground mb-1">Brand Not Mentioned</p>
+          <p className="text-sm text-muted-foreground max-w-xs mx-auto">
+            Your brand wasn&apos;t referenced in this AI response. Sentiment analysis requires a brand mention to measure tone.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  // If no sentiment data at all (but brand was mentioned), show pending state
+  const hasSentimentData = data || simpleSentiment;
+  if (!hasSentimentData) {
     return (
       <div className="rounded-2xl border border-border bg-card p-6">
         <div className="flex items-center gap-3 mb-4">
@@ -51,12 +96,12 @@ export function SentimentAnalysisCard({
           </div>
           <div>
             <h3 className="font-semibold">Sentiment Analysis</h3>
-            <p className="text-sm text-muted-foreground">Brand not mentioned</p>
+            <p className="text-sm text-muted-foreground">Analysis pending</p>
           </div>
         </div>
         <div className="text-center py-4">
           <p className="text-4xl font-bold text-muted-foreground">—</p>
-          <p className="text-sm text-muted-foreground mt-1">No data available</p>
+          <p className="text-sm text-muted-foreground mt-1">Processing sentiment data...</p>
         </div>
       </div>
     );
@@ -73,7 +118,7 @@ export function SentimentAnalysisCard({
             </div>
             <div>
               <h3 className="font-semibold">Net Sentiment Score</h3>
-              <p className="text-sm text-muted-foreground capitalize">{label} overall tone</p>
+              <p className="text-sm text-muted-foreground capitalize">{label} tone towards your brand</p>
             </div>
           </div>
         </div>
@@ -115,13 +160,17 @@ export function SentimentAnalysisCard({
             <div className="flex items-center justify-between text-sm">
               <span className="text-muted-foreground">Polarity</span>
               <span className="font-medium">
-                {polarity > 0 ? "+" : ""}{polarity.toFixed(2)}
+                {typeof polarity === "number"
+                  ? `${polarity > 0 ? "+" : ""}${polarity.toFixed(2)}`
+                  : "—"}
               </span>
             </div>
             <div className="flex items-center justify-between text-sm">
               <span className="text-muted-foreground">Confidence</span>
               <span className="font-medium">
-                {Math.round((data?.confidence ?? 0.5) * 100)}%
+                {typeof data?.confidence === "number"
+                  ? `${Math.round(data.confidence * 100)}%`
+                  : "—"}
               </span>
             </div>
           </div>
@@ -190,4 +239,5 @@ export function SentimentAnalysisCard({
     </div>
   );
 }
+
 

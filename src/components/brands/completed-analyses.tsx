@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { useRouter } from "next/navigation";
 import { formatDistanceToNow } from "date-fns";
+import { AnimatePresence, motion } from "framer-motion";
 import { 
   CheckCircle2, 
   Eye, 
@@ -216,13 +217,20 @@ export function CompletedAnalyses({ brandId, onNewCompletion }: CompletedAnalyse
         </div>
       ) : (
         <div className="divide-y divide-border">
+          <AnimatePresence initial={false} mode="popLayout">
           {displayedBatches.map((batch) => {
             const isRecent = recentlyCompleted.has(batch.id);
             const hasNavigation = !!getPromptIdForNavigation(batch);
             
             return (
-              <div 
+              <motion.div
                 key={batch.id}
+                layout
+                layoutId={`batch-${batch.id}`}
+                initial={{ opacity: 0, y: 6, scale: 0.98 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={{ opacity: 0, y: 6, scale: 0.98 }}
+                transition={{ type: "spring", stiffness: 520, damping: 40, mass: 0.6 }}
                 onClick={() => handleRowClick(batch)}
                 className={`group flex items-center gap-3 px-4 py-3 transition-colors ${
                   isRecent ? 'bg-emerald-500/5' : 'hover:bg-muted/30'
@@ -264,9 +272,10 @@ export function CompletedAnalyses({ brandId, onNewCompletion }: CompletedAnalyse
                 {hasNavigation && (
                   <ChevronRight className="w-4 h-4 text-muted-foreground group-hover:text-primary transition-colors shrink-0" />
                 )}
-              </div>
+              </motion.div>
             );
           })}
+          </AnimatePresence>
         </div>
       )}
     </div>

@@ -8,6 +8,7 @@
  * - Union of all brands seen (high recall)
  * - Frequency per brand (how often it appears)
  * - Confidence score for "brand appears in live-like output"
+ * - Statistical significance testing
  * 
  * Brand presence classification:
  * - Definite present: brand appears in ≥60% of runs
@@ -26,6 +27,8 @@ import {
   ENSEMBLE_RUN_COUNT, 
   BRAND_CONFIDENCE_THRESHOLDS,
   DEFAULT_BROWSER_SIMULATION_MODE,
+  MIN_ENSEMBLE_RUNS,
+  MAX_ENSEMBLE_RUNS,
   type BrowserSimulationMode,
 } from "@/lib/ai/openai-config";
 import type {
@@ -34,6 +37,8 @@ import type {
   SupportedRegion,
   SimulationRawResult,
   SourceReference,
+  ConfidenceInterval,
+  EnsembleVarianceMetrics,
 } from "@/types";
 
 // ===========================================
@@ -60,6 +65,9 @@ export interface EnsembleBrandResult {
   source_frequency: number;    // How often found in sources
   evidence_summary: string;
   
+  // Statistical confidence
+  confidence_interval?: ConfidenceInterval;
+  
   // Per-run details
   run_details: Array<{
     run_index: number;
@@ -83,6 +91,11 @@ export interface TargetBrandResult {
   mentioned_in_runs: number;       // Runs where brand was in answer text
   supported_in_runs: number;       // Runs where brand was in sources
   total_runs: number;
+  
+  // Statistical confidence
+  confidence_interval?: ConfidenceInterval;
+  statistical_significance: boolean;
+  p_value?: number;
   
   // Evidence for each run
   run_results: Array<{
@@ -120,6 +133,9 @@ export interface EnsembleSimulationResult {
   representative_answer: string;
   representative_run_index: number;
   
+  // Variance metrics (when enabled)
+  variance_metrics?: EnsembleVarianceMetrics;
+  
   // Individual run results (for debugging/analysis)
   run_results: Array<{
     index: number;
@@ -132,6 +148,99 @@ export interface EnsembleSimulationResult {
   
   // Analysis notes
   notes: string[];
+}
+
+// ===========================================
+// Statistical Functions
+// ===========================================
+
+/**
+ * Calculate Wilson score confidence interval for a proportion.
+ * More accurate than simple binomial for small sample sizes.
+ */
+function calculateWilsonConfidenceInterval(
+  successCount: number,
+  totalTrials: number,
+  confidenceLevel: number = 0.95
+): ConfidenceInterval {
+  // Z-scores for common confidence levels
+  const zScores: Record<number, number> = {
+    0.90: 1.645,
+    0.95: 1.96,
+    0.99: 2.576,
+  };
+  const z = zScores[confidenceLevel] || 1.96;
+  
+  const n = totalTrials;
+  const p = successCount / n;
+  
+  if (n === 0) {
+    return {
+      frequency: 0,
+      lower_bound: 0,
+      upper_bound: 0,
+      confidence_level: confidenceLevel,
+      sample_size: 0,
+    };
+  }
+  
+  // Wilson score interval formula
+  const denominator = 1 + (z * z) / n;
+  const center = (p + (z * z) / (2 * n)) / denominator;
+  const margin = (z / denominator) * Math.sqrt((p * (1 - p)) / n + (z * z) / (4 * n * n));
+  
+  return {
+    frequency: p,
+    lower_bound: Math.max(0, center - margin),
+    upper_bound: Math.min(1, center + margin),
+    confidence_level: confidenceLevel,
+    sample_size: n,
+  };
+}
+
+/**
+ * Calculate p-value for the null hypothesis that brand is absent.
+ * Uses binomial test.
+ */
+function calculatePValue(
+  successCount: number,
+  totalTrials: number,
+  nullProbability: number = 0.05 // Assume 5% baseline presence by chance
+): number {
+  // Binomial cumulative probability
+  // P(X >= successCount) under null hypothesis
+  let pValue = 0;
+  
+  for (let k = successCount; k <= totalTrials; k++) {
+    const combination = binomialCoefficient(totalTrials, k);
+    pValue += combination * Math.pow(nullProbability, k) * Math.pow(1 - nullProbability, totalTrials - k);
+  }
+  
+  return Math.min(1, pValue);
+}
+
+/**
+ * Calculate binomial coefficient (n choose k)
+ */
+function binomialCoefficient(n: number, k: number): number {
+  if (k > n || k < 0) return 0;
+  if (k === 0 || k === n) return 1;
+  
+  let result = 1;
+  for (let i = 1; i <= k; i++) {
+    result = result * (n - i + 1) / i;
+  }
+  return result;
+}
+
+/**
+ * Determine if a result is statistically significant.
+ */
+function isStatisticallySignificant(
+  pValue: number,
+  significanceLevel: number = 0.05
+): boolean {
+  return pValue < significanceLevel;
 }
 
 // ===========================================
@@ -152,11 +261,22 @@ export interface RunEnsembleInput {
     aliases: string[];
   };
   
-  // Override default run count
+  // Override default run count (1-15)
   run_count?: number;
   
   // Simulation mode: api (default), browser (Playwright), or hybrid
   simulation_mode?: BrowserSimulationMode;
+  
+  // Enable detailed variance metrics
+  enable_variance_metrics?: boolean;
+}
+
+/**
+ * Validate and normalize run count to allowed range.
+ */
+function normalizeRunCount(runCount?: number): number {
+  const count = runCount ?? ENSEMBLE_RUN_COUNT;
+  return Math.max(MIN_ENSEMBLE_RUNS, Math.min(MAX_ENSEMBLE_RUNS, count));
 }
 
 /**
@@ -164,7 +284,6 @@ export interface RunEnsembleInput {
  * 
  * NOTE: Browser/BrowserPool mode is DEPRECATED. 
  * For real browser automation, use RPA mode which runs via the external Python worker.
- * RPA simulations are handled separately (awaiting_rpa status) and don't go through this function.
  */
 async function runSimulationWithMode(
   input: {
@@ -215,9 +334,13 @@ export async function runEnsembleSimulation(
     region = "global", 
     brand_domain,
     target_brand,
-    run_count = ENSEMBLE_RUN_COUNT,
+    run_count: requestedRunCount,
     simulation_mode = DEFAULT_BROWSER_SIMULATION_MODE,
+    enable_variance_metrics = false,
   } = input;
+  
+  // Validate and normalize run count
+  const run_count = normalizeRunCount(requestedRunCount);
   
   // Force API mode - browser/BrowserPool is deprecated, RPA is handled separately
   const effectiveMode = (simulation_mode === 'browser' || simulation_mode === 'hybrid') 
@@ -233,12 +356,11 @@ export async function runEnsembleSimulation(
   const seenUrls = new Set<string>();
   
   // Run simulations sequentially to avoid rate limits
-  // (Could be parallelized with careful rate limiting)
   for (let i = 0; i < run_count; i++) {
     console.log(`[Ensemble] Run ${i + 1}/${run_count} (${modeLabel})...`);
     
     try {
-      // 1. Run simulation using API mode (browser/BrowserPool deprecated)
+      // 1. Run simulation using API mode
       const simResult = await runSimulationWithMode({
         engine,
         keyword,
@@ -302,7 +424,7 @@ export async function runEnsembleSimulation(
   console.log(`[Ensemble] ${totalSuccessful}/${run_count} runs successful`);
   
   // 4. Aggregate brands across all runs
-  const allBrands = aggregateBrandsAcrossRuns(allBrandExtractions, totalSuccessful);
+  const allBrands = aggregateBrandsAcrossRuns(allBrandExtractions, totalSuccessful, enable_variance_metrics);
   
   // 5. Analyze target brand (if specified)
   let targetBrandResult: TargetBrandResult | undefined;
@@ -310,12 +432,13 @@ export async function runEnsembleSimulation(
     targetBrandResult = analyzeTargetBrand(
       target_brand,
       allBrandExtractions,
-      runResults
+      runResults,
+      enable_variance_metrics
     );
-    console.log(`[Ensemble] Target brand "${target_brand.name}": ${targetBrandResult.presence_level} (${Math.round(targetBrandResult.visibility_frequency * 100)}%)`);
+    console.log(`[Ensemble] Target brand "${target_brand.name}": ${targetBrandResult.presence_level} (${Math.round(targetBrandResult.visibility_frequency * 100)}%)${targetBrandResult.statistical_significance ? ' [statistically significant]' : ''}`);
   }
   
-  // 6. Find representative answer (most common structure)
+  // 6. Find representative answer
   const representativeRunIndex = findRepresentativeRun(successfulRuns, allBrands, target_brand);
   const representativeAnswer = successfulRuns[representativeRunIndex]?.answer_text || "";
   
@@ -346,6 +469,30 @@ export async function runEnsembleSimulation(
     if (targetBrandResult.presence_level === "inconclusive") {
       notes.push(`Target brand visibility is inconclusive - appeared in only ${targetBrandResult.mentioned_in_runs + targetBrandResult.supported_in_runs}/${totalSuccessful} runs`);
     }
+    if (!targetBrandResult.statistical_significance) {
+      notes.push(`Result is not statistically significant - consider running more simulations`);
+    }
+  }
+  
+  // 9. Build variance metrics if enabled
+  let varianceMetrics: EnsembleVarianceMetrics | undefined;
+  if (enable_variance_metrics) {
+    const targetFrequency = targetBrandResult?.visibility_frequency ?? 0;
+    const visibleRuns = targetBrandResult 
+      ? targetBrandResult.mentioned_in_runs + targetBrandResult.supported_in_runs
+      : 0;
+    
+    varianceMetrics = {
+      run_count,
+      successful_runs: totalSuccessful,
+      brand_variance: brandVariance,
+      confidence_interval: calculateWilsonConfidenceInterval(visibleRuns, totalSuccessful),
+      statistical_significance: targetBrandResult?.statistical_significance ?? false,
+      p_value: targetBrandResult?.p_value,
+      standard_error: totalSuccessful > 0 
+        ? Math.sqrt((targetFrequency * (1 - targetFrequency)) / totalSuccessful)
+        : undefined,
+    };
   }
   
   return {
@@ -360,6 +507,7 @@ export async function runEnsembleSimulation(
     unique_domains: uniqueDomains,
     representative_answer: representativeAnswer,
     representative_run_index: representativeRunIndex,
+    variance_metrics: varianceMetrics,
     run_results: runResults,
     notes,
   };
@@ -374,7 +522,8 @@ export async function runEnsembleSimulation(
  */
 function aggregateBrandsAcrossRuns(
   extractions: BrandExtractionResult[],
-  totalRuns: number
+  totalRuns: number,
+  includeConfidenceIntervals: boolean = false
 ): EnsembleBrandResult[] {
   const brandMap = new Map<string, {
     name: string;
@@ -430,7 +579,7 @@ function aggregateBrandsAcrossRuns(
     const frequency = entry.appearances / totalRuns;
     const presenceLevel = getPresenceLevel(frequency);
     
-    results.push({
+    const result: EnsembleBrandResult = {
       name: entry.name,
       normalized_name: normalizedName,
       domain: entry.domain,
@@ -442,7 +591,13 @@ function aggregateBrandsAcrossRuns(
       source_frequency: entry.sourceAppearances / totalRuns,
       evidence_summary: `Appeared in ${entry.appearances}/${totalRuns} runs (${entry.totalMentions} mentions, ${entry.totalSources} sources)`,
       run_details: entry.runDetails,
-    });
+    };
+    
+    if (includeConfidenceIntervals) {
+      result.confidence_interval = calculateWilsonConfidenceInterval(entry.appearances, totalRuns);
+    }
+    
+    results.push(result);
   }
   
   // Sort by frequency (highest first)
@@ -456,7 +611,8 @@ function analyzeTargetBrand(
   target: { name: string; domain: string; aliases: string[] },
   extractions: BrandExtractionResult[],
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  _runResults: EnsembleSimulationResult["run_results"]
+  _runResults: EnsembleSimulationResult["run_results"],
+  includeStatistics: boolean = false
 ): TargetBrandResult {
   const runResultsArr: TargetBrandResult["run_results"] = [];
   let mentionedInRuns = 0;
@@ -490,31 +646,52 @@ function analyzeTargetBrand(
   const visibilityFrequency = visibleInRuns / totalRuns;
   const presenceLevel = getPresenceLevel(visibilityFrequency);
   
-  // Determine confidence based on consistency
+  // Calculate statistical significance
+  const pValue = includeStatistics 
+    ? calculatePValue(visibleInRuns, totalRuns)
+    : undefined;
+  const statisticalSignificance = pValue !== undefined 
+    ? isStatisticallySignificant(pValue)
+    : visibilityFrequency >= 0.6 || visibilityFrequency === 0;
+  
+  // Calculate confidence interval
+  const confidenceInterval = includeStatistics
+    ? calculateWilsonConfidenceInterval(visibleInRuns, totalRuns)
+    : undefined;
+  
+  // Determine confidence based on consistency and sample size
   let confidence: "high" | "medium" | "low";
-  if (visibilityFrequency >= 0.8 || visibilityFrequency <= 0.2) {
-    confidence = "high"; // Clear result
-  } else if (visibilityFrequency >= 0.5) {
+  if (totalRuns >= 5 && (visibilityFrequency >= 0.8 || visibilityFrequency <= 0.2)) {
+    confidence = "high";
+  } else if (totalRuns >= 3 && visibilityFrequency >= 0.5) {
     confidence = "medium";
   } else {
     confidence = "low";
   }
   
-  // Generate summary
+  // Generate summary with statistical context
   let summary: string;
+  const ciSuffix = confidenceInterval 
+    ? ` (95% CI: ${Math.round(confidenceInterval.lower_bound * 100)}-${Math.round(confidenceInterval.upper_bound * 100)}%)`
+    : '';
+  
   switch (presenceLevel) {
     case "definite_present":
-      summary = `${target.name} is definitively visible (appeared in ${Math.round(visibilityFrequency * 100)}% of simulations)`;
+      summary = `${target.name} is definitively visible (appeared in ${Math.round(visibilityFrequency * 100)}% of simulations)${ciSuffix}`;
       break;
     case "possible_present":
-      summary = `${target.name} may be visible (appeared in ${Math.round(visibilityFrequency * 100)}% of simulations) - results vary`;
+      summary = `${target.name} may be visible (appeared in ${Math.round(visibilityFrequency * 100)}% of simulations)${ciSuffix} - results vary`;
       break;
     case "inconclusive":
-      summary = `${target.name} visibility is inconclusive (appeared in only ${Math.round(visibilityFrequency * 100)}% of simulations)`;
+      summary = `${target.name} visibility is inconclusive (appeared in only ${Math.round(visibilityFrequency * 100)}% of simulations)${ciSuffix}`;
       break;
     case "likely_absent":
       summary = `${target.name} is likely not visible (not found in any simulation)`;
       break;
+  }
+  
+  if (!statisticalSignificance && totalRuns < 5) {
+    summary += ` Consider running more simulations for statistical significance.`;
   }
   
   return {
@@ -526,6 +703,9 @@ function analyzeTargetBrand(
     mentioned_in_runs: mentionedInRuns,
     supported_in_runs: supportedInRuns,
     total_runs: totalRuns,
+    confidence_interval: confidenceInterval,
+    statistical_significance: statisticalSignificance,
+    p_value: pValue,
     run_results: runResultsArr,
     summary,
   };
@@ -564,7 +744,7 @@ function calculateBrandVariance(extractions: BrandExtractionResult[]): number {
 }
 
 /**
- * Find the most representative run (closest to median brand count with target brand present if applicable)
+ * Find the most representative run
  */
 function findRepresentativeRun(
   successfulRuns: EnsembleSimulationResult["run_results"],
@@ -574,7 +754,6 @@ function findRepresentativeRun(
   if (successfulRuns.length === 0) return 0;
   if (successfulRuns.length === 1) return 0;
   
-  // Calculate median brand count
   const brandCounts = successfulRuns
     .filter(r => r.brands_extracted)
     .map(r => r.brands_extracted!.all_brands.length)
@@ -582,7 +761,6 @@ function findRepresentativeRun(
   
   const medianCount = brandCounts[Math.floor(brandCounts.length / 2)];
   
-  // Find run closest to median that has target brand (if specified and present in majority)
   let bestIndex = 0;
   let bestScore = Infinity;
   
@@ -593,7 +771,6 @@ function findRepresentativeRun(
     const countDiff = Math.abs(run.brands_extracted.all_brands.length - medianCount);
     let score = countDiff;
     
-    // Penalize runs without target brand if it's usually present
     if (target_brand) {
       const visibility = checkBrandVisibility(run.brands_extracted, target_brand);
       const targetFrequency = allBrands.find(b => 
@@ -601,7 +778,7 @@ function findRepresentativeRun(
       )?.frequency || 0;
       
       if (!visibility.is_visible && targetFrequency >= 0.5) {
-        score += 10; // Heavy penalty for missing commonly-present target
+        score += 10;
       }
     }
     
@@ -615,18 +792,16 @@ function findRepresentativeRun(
 }
 
 // ===========================================
-// Simplified Single-Run Mode (for backwards compatibility)
+// Simplified Single-Run Mode
 // ===========================================
 
 /**
  * Run a single simulation with brand extraction
- * Use this for quick checks or when ensemble is too expensive
  */
 export async function runSingleSimulationWithExtraction(
-  input: Omit<RunEnsembleInput, "run_count">
+  input: Omit<RunEnsembleInput, "run_count" | "enable_variance_metrics">
 ): Promise<{
   simulation: SimulationRawResult;
-  brand_extraction: BrandExtractionResult;
   target_visibility?: {
     is_visible: boolean;
     confidence: "high" | "medium" | "low";
@@ -640,15 +815,13 @@ export async function runSingleSimulationWithExtraction(
     region = "global", 
     brand_domain, 
     target_brand,
-    simulation_mode = 'api', // Default to API, browser/BrowserPool is deprecated
+    simulation_mode = 'api',
   } = input;
   
-  // Force API mode - browser/BrowserPool is deprecated
   const effectiveMode = (simulation_mode === 'browser' || simulation_mode === 'hybrid') 
     ? 'api' 
     : simulation_mode;
   
-  // Run simulation using API mode
   const simulation = await runSimulationWithMode({
     engine,
     keyword,
@@ -658,30 +831,37 @@ export async function runSingleSimulationWithExtraction(
     simulation_mode: effectiveMode,
   });
   
-  // Extract brands
-  const brand_extraction = await extractBrands({
-    answer_text: simulation.answer_html,
-    sources: simulation.sources,
-    search_results: simulation.search_context?.results,
-    target_brand,
-    engine,
-  });
-  
-  // Check target brand visibility
   let target_visibility;
   if (target_brand) {
-    const visibility = checkBrandVisibility(brand_extraction, target_brand);
+    const answer = (simulation.answer_html || "").toLowerCase();
+    const domain = (target_brand.domain || "").toLowerCase().replace(/^www\./, "");
+    const domainCore = domain.split(".")[0];
+    const names = [
+      target_brand.name,
+      domain,
+      domainCore,
+      ...(target_brand.aliases || []),
+    ]
+      .map((s) => (s || "").toLowerCase().trim())
+      .filter((s) => s.length >= 3);
+
+    const mentioned = names.some((n) => answer.includes(n));
+    const supported = (simulation.sources || []).some((s) => (s.url || "").toLowerCase().includes(domainCore));
+
+    const evidence: string[] = [];
+    if (mentioned) evidence.push("Mentioned in answer text");
+    if (supported) evidence.push("Supported by cited sources");
+    const confidence: "high" | "medium" | "low" = mentioned ? "high" : supported ? "medium" : "low";
+
     target_visibility = {
-      is_visible: visibility.is_visible,
-      confidence: visibility.confidence,
-      evidence: visibility.evidence,
+      is_visible: mentioned || supported,
+      confidence,
+      evidence: evidence.length ? evidence : ["Not mentioned and not supported by sources"],
     };
   }
   
   return {
     simulation,
-    brand_extraction,
     target_visibility,
   };
 }
-

@@ -20,45 +20,34 @@
  * - Schema fix generation
  */
 
-import { task, queue } from "@trigger.dev/sdk/v3";
+import { task, queue, tasks } from "@trigger.dev/sdk/v3";
 import { createClient } from "@supabase/supabase-js";
 import { 
   runEnsembleSimulation,
   runSingleSimulationWithExtraction,
 } from "@/lib/ai/ensemble-simulation";
-import { 
-  analyzeSelectionSignals, 
-  thoroughVisibilityCheck,
-  enhanceWithTieredRecommendations,
-  extractQuickWins,
-} from "@/lib/ai/selection-signals";
-import { calculateAEOScore } from "@/lib/ai/aeo-scoring";
+import { thoroughVisibilityCheck } from "@/lib/ai/selection-signals";
 import { textToSafeHtml } from "@/lib/ai/text-to-html";
 import { replacePlaceholders, hasPlaceholders } from "@/lib/ai/placeholder-replacer";
-import { 
-  detectHallucinations, 
-  detectNegativeHallucination,
-  type GroundTruthData,
-  type HallucinationResult,
-} from "@/lib/ai/hallucination-detector";
-import { analyzeSentiment } from "@/lib/ai/sentiment-analyzer";
-import { generateSchemaFix } from "@/lib/ai/schema-generator";
+import type { GroundTruthData } from "@/lib/ai/hallucination-detector";
+import type { CrawlAnalysis } from "@/lib/ai/crawl-analyzer";
 import { 
   ENSEMBLE_RUN_COUNT, 
   DEFAULT_BROWSER_SIMULATION_MODE,
   type BrowserSimulationMode,
 } from "@/lib/ai/openai-config";
+import { SIMULATION_PIPELINE_VERSION, VISIBILITY_CONTRACT_VERSION } from "@/lib/ai/versions";
+import { withLogContext, createRequestId } from "@/lib/logging/logger";
 import type { 
   CheckVisibilityInput, 
   SupportedEngine, 
   SupportedLanguage, 
+  SelectionSignals,
   CitationAuthority, 
-  DetectedHallucination, 
-  ActionItem,
   BrandPresenceLevel,
   EnsembleSimulationData,
+  SimulationMode,
 } from "@/types";
-import type { CrawlAnalysis } from "@/lib/ai/crawl-analyzer";
 
 // Create Supabase client with service role for job access
 function getSupabase() {
@@ -75,14 +64,25 @@ function getSupabase() {
 // This allows multiple engines to run in parallel while respecting
 // per-engine rate limits
 
+// Default queue (backwards-compatible)
 const simulationQueue = queue({
   name: "ai-simulations",
-  concurrencyLimit: 15, // Max 15 simulations running across all engines
+  concurrencyLimit: 8, // Reduced to prevent API rate limit issues (was 15)
 });
+
+// Per-engine queues (must be defined ahead of time; triggering uses queue NAME)
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+const chatgptQueue = queue({ name: "sim-chatgpt", concurrencyLimit: 2 }); // Reduced to prevent rate limits with ensemble runs
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+const grokQueue = queue({ name: "sim-grok", concurrencyLimit: 2 }); // Reduced for rate limits
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+const geminiQueue = queue({ name: "sim-gemini", concurrencyLimit: 6 });
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+const perplexityQueue = queue({ name: "sim-perplexity", concurrencyLimit: 6 });
 
 export const checkPromptVisibility = task({
   id: "check-prompt-visibility",
-  maxDuration: 180, // 3 minutes max (reduced from 5 - simpler flow)
+  maxDuration: 360, // gpt-5-nano + multi-engine runs can exceed 3 minutes in real conditions
   queue: simulationQueue, // Use shared queue for concurrency control
   retry: {
     maxAttempts: 2,
@@ -91,33 +91,47 @@ export const checkPromptVisibility = task({
     maxTimeoutInMs: 8000, // Reduced from 10000
   },
 
-  run: async (payload: CheckVisibilityInput) => {
+  run: async (payload: CheckVisibilityInput, { ctx }) => {
     // Support both prompt_id (new) and keyword_id (legacy) for backwards compatibility
     const prompt_id = payload.prompt_id || payload.keyword_id;
     const { 
       brand_id, 
       analysis_batch_id, 
       engine, 
-      language, 
+      language,
       region = "global", 
       enable_hallucination_watchdog,
       simulation_mode = DEFAULT_BROWSER_SIMULATION_MODE,
+      ensemble_run_count,
+      enable_variance_metrics = false,
     } = payload;
+    const effectiveLanguage = ((language || "en") as SupportedLanguage);
     const supabase = getSupabase();
+    const request_id = createRequestId();
+    const logger = withLogContext({
+      request_id,
+      task: "check-prompt-visibility",
+      engine,
+      brand_id,
+      analysis_batch_id,
+      prompt_id,
+    });
+
+    // IMPORTANT: This task triggers additional child tasks (enrichment + finalization) using trigger() (non-wait).
+    // In that mode, Trigger does NOT automatically version-lock the children to this run. Explicitly lock them.
+    const childVersion = ctx.run.version ?? ctx.deployment?.version;
     
     // Log simulation mode for visibility
     const modeLabel = simulation_mode === 'api' ? 'API' 
       : simulation_mode === 'browser' ? 'Browser (Playwright)' 
       : simulation_mode === 'rpa' ? 'RPA (External)' 
       : 'Hybrid';
-    console.log(`[Visibility] Mode: ${modeLabel}`);
+    logger.info("Starting simulation", { mode: modeLabel });
 
-    console.log(`Running simulation: ${engine} for prompt ${prompt_id}`);
-
-    // 1. Fetch brand details
+    // 1. Fetch brand details (minimal fields only)
     const { data: brand, error: brandError } = await supabase
       .from("brands")
-      .select("*, organizations(*)")
+      .select("id, name, domain, brand_aliases, settings, last_crawled_at, ground_truth_summary, organizations(id, credits_balance)")
       .eq("id", brand_id)
       .single();
 
@@ -125,22 +139,27 @@ export const checkPromptVisibility = task({
       throw new Error(`Brand not found: ${brand_id}`);
     }
 
-    // 2. Fetch prompt
-    const { data: prompt, error: promptError } = await supabase
-      .from("prompts")
-      .select("*")
-      .eq("id", prompt_id)
-      .single();
-
-    if (promptError || !prompt) {
-      throw new Error(`Prompt not found: ${prompt_id}`);
-    }
-
-    const organization = brand.organizations;
+    const organization = Array.isArray(brand.organizations)
+      ? brand.organizations[0]
+      : brand.organizations;
 
     // 3. Replace placeholders in prompt text with brand context
-    let promptText = prompt.text;
-    if (hasPlaceholders(promptText)) {
+    let promptText: string | undefined = payload.prompt_text;
+    if (!promptText) {
+      // Only fetch prompt text if it wasn't passed in (perf optimization)
+      const { data: prompt, error: promptError } = await supabase
+        .from("prompts")
+        .select("id, text")
+        .eq("id", prompt_id)
+        .single();
+
+      if (promptError || !prompt) {
+        throw new Error(`Prompt not found: ${prompt_id}`);
+      }
+
+      promptText = prompt.text;
+    }
+    if (promptText && hasPlaceholders(promptText)) {
       const originalPrompt = promptText;
       const settings = brand.settings as Record<string, unknown> || {};
       promptText = replacePlaceholders(promptText, {
@@ -155,92 +174,113 @@ export const checkPromptVisibility = task({
       });
       console.log(`Replaced placeholders: "${originalPrompt}" -> "${promptText}"`);
     }
+    if (!promptText) {
+      throw new Error(`Prompt text missing for prompt_id: ${prompt_id}`);
+    }
 
-    // 3.5. Fetch ground truth content from crawled pages (if available)
+    // 3.5. Ground truth (fast path)
+    // Avoid per-simulation DB reads of crawled_pages (expensive and duplicated across engines).
+    // Prefer using structured ground truth stored on the brand record.
     let groundTruthContent: string | undefined;
     let structuredGroundTruth: GroundTruthData | undefined;
     
-    if (brand.last_crawled_at) {
-      const { data: crawledPages } = await supabase
-        .from("crawled_pages")
-        .select("title, content_excerpt, url")
-        .eq("brand_id", brand_id)
-        .order("created_at", { ascending: false })
-        .limit(15); // Get top 15 pages for ground truth
+    const groundTruthSummary = brand.ground_truth_summary as {
+      structured_data?: {
+        pricing?: { plan_name: string; price: string; features?: string[]; is_free?: boolean }[];
+        features?: string[];
+        products?: string[];
+        services?: string[];
+        company_description?: string;
+        tagline?: string;
+        locations?: string[];
+      };
+    } | null;
 
-      if (crawledPages && crawledPages.length > 0) {
-        groundTruthContent = crawledPages
-          .map(page => `## ${page.title || page.url}\n${page.content_excerpt || ""}`)
-          .join("\n\n---\n\n");
-        console.log(`Loaded ground truth from ${crawledPages.length} crawled pages`);
-        
-        // Load structured ground truth from brand settings
-        const groundTruthSummary = brand.ground_truth_summary as {
-          structured_data?: {
-            pricing?: { plan_name: string; price: string; features?: string[]; is_free?: boolean }[];
-            features?: string[];
-            products?: string[];
-            services?: string[];
-            company_description?: string;
-            tagline?: string;
-            locations?: string[];
-          };
-        } | null;
-        
-        if (groundTruthSummary?.structured_data) {
-          structuredGroundTruth = {
-            ...groundTruthSummary.structured_data,
-            raw_content: groundTruthContent,
-            crawled_pages: crawledPages.map(p => ({
-              url: p.url,
-              title: p.title || p.url,
-              excerpt: p.content_excerpt || "",
-            })),
-          };
-          console.log(`Loaded structured ground truth: ${structuredGroundTruth.pricing?.length || 0} pricing, ${structuredGroundTruth.features?.length || 0} features`);
-        }
+    if (groundTruthSummary?.structured_data) {
+      structuredGroundTruth = {
+        ...groundTruthSummary.structured_data,
+        raw_content: "",
+        crawled_pages: [],
+      };
+
+      // Build a compact “ground truth” string from structured data only (fast + stable)
+      const parts: string[] = [];
+      if (structuredGroundTruth.tagline) parts.push(`Tagline: ${structuredGroundTruth.tagline}`);
+      if (structuredGroundTruth.company_description) parts.push(`Description: ${structuredGroundTruth.company_description}`);
+      if (structuredGroundTruth.products?.length) parts.push(`Products: ${structuredGroundTruth.products.slice(0, 12).join(", ")}`);
+      if (structuredGroundTruth.services?.length) parts.push(`Services: ${structuredGroundTruth.services.slice(0, 12).join(", ")}`);
+      if (structuredGroundTruth.features?.length) parts.push(`Features: ${structuredGroundTruth.features.slice(0, 20).join(", ")}`);
+      if (structuredGroundTruth.pricing?.length) {
+        parts.push(
+          `Pricing: ${structuredGroundTruth.pricing
+            .slice(0, 6)
+            .map(p => `${p.plan_name}: ${p.price}${p.is_free ? " (free)" : ""}`)
+            .join(" | ")}`
+        );
       }
+      if (structuredGroundTruth.locations?.length) parts.push(`Locations: ${structuredGroundTruth.locations.slice(0, 10).join(", ")}`);
+
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      groundTruthContent = parts.join("\n");
+      console.log(`Loaded structured ground truth: ${structuredGroundTruth.pricing?.length || 0} pricing, ${structuredGroundTruth.features?.length || 0} features`);
     }
 
-    // 4. Check if simulation already exists, create if not
-    let simulation = await supabase
-      .from("simulations")
-      .select("id")
-      .eq("analysis_batch_id", analysis_batch_id)
-      .eq("prompt_id", prompt_id)
-      .eq("engine", engine)
-      .single();
+    // 4. Upsert simulation record (idempotent across retries / concurrent triggers)
+    // Requires unique constraint: (analysis_batch_id, prompt_id, engine)
+    //
+    // IMPORTANT: During rollout, Supabase/PostgREST schema cache may not yet include new columns.
+    // We fallback to an upsert without stage/enrichment columns to avoid failing runs.
+    const baseUpsert = {
+      brand_id,
+      prompt_id,
+      analysis_batch_id,
+      engine,
+      language,
+      region,
+      prompt_text: promptText, // Use the processed prompt with placeholders replaced
+      status: simulation_mode === "rpa" ? "awaiting_rpa" : "processing",
+    } as Record<string, unknown>;
 
-    if (!simulation.data) {
-      // Create the simulation record
-      const { data: newSim, error: createError } = await supabase
+    const upsertWithStage = {
+      ...baseUpsert,
+      analysis_stage: `simulating:${engine}`,
+      enrichment_status: "queued",
+    };
+
+    let simulationId: string;
+    {
+      const { data: simulation, error: simError } = await supabase
         .from("simulations")
-        .insert({
-          brand_id,
-          prompt_id,
-          analysis_batch_id,
-          engine,
-          language,
-          region,
-          prompt_text: promptText, // Use the processed prompt with placeholders replaced
-          status: "processing",
-        })
-        .select()
+        .upsert(upsertWithStage, { onConflict: "analysis_batch_id,prompt_id,engine" })
+        .select("id")
         .single();
 
-      if (createError) {
-        throw new Error(`Failed to create simulation: ${createError.message}`);
-      }
-      simulation = { data: newSim, error: null, count: null, status: 200, statusText: "OK" };
-    } else {
-      // Update to processing (or awaiting_rpa for RPA mode)
-      await supabase
-        .from("simulations")
-        .update({ status: simulation_mode === 'rpa' ? "awaiting_rpa" : "processing" })
-        .eq("id", simulation.data.id);
-    }
+      if (!simError && simulation?.id) {
+        simulationId = simulation.id;
+      } else {
+        const msg = simError?.message || "";
+        const isSchemaCacheMissing =
+          msg.includes("schema cache") &&
+          (msg.includes("analysis_stage") || msg.includes("enrichment_status"));
 
-    const simulationId = simulation.data.id;
+        if (!isSchemaCacheMissing) {
+          throw new Error(`Failed to upsert simulation: ${simError?.message}`);
+        }
+
+        // Fallback upsert without new columns
+        const { data: fallbackSim, error: fallbackErr } = await supabase
+          .from("simulations")
+          .upsert(baseUpsert, { onConflict: "analysis_batch_id,prompt_id,engine" })
+          .select("id")
+          .single();
+
+        if (fallbackErr || !fallbackSim?.id) {
+          throw new Error(`Failed to upsert simulation: ${fallbackErr?.message}`);
+        }
+
+        simulationId = fallbackSim.id;
+      }
+    }
 
     // ===========================================
     // RPA MODE: Create record and exit early
@@ -254,6 +294,27 @@ export const checkPromptVisibility = task({
       console.log(`[RPA Mode] Simulation ${simulationId} created with status 'awaiting_rpa'`);
       console.log(`[RPA Mode] Run the Python RPA script to complete this simulation:`);
       console.log(`  cd rpa && python main.py --csv prompts.csv --engine ${engine}`);
+
+      // IMPORTANT: Seed selection_signals for RPA so downstream jobs (rpa-ingest + analyze-rpa-simulation)
+      // can correctly determine whether Hallucination Watchdog should run.
+      // Without this, rpa-ingest defaults watchdog to disabled and non-ChatGPT engines never run it.
+      try {
+        await supabase
+          .from("simulations")
+          .update({
+            selection_signals: {
+              source: "rpa_seed",
+              analysis_pending: true,
+              hallucination_watchdog: {
+                enabled: enable_hallucination_watchdog === true,
+                result: null,
+              },
+            },
+          })
+          .eq("id", simulationId);
+      } catch {
+        // best-effort
+      }
       
       // Update batch progress (we count RPA as "submitted" not "completed")
       // The webhook will handle final completion
@@ -280,7 +341,9 @@ export const checkPromptVisibility = task({
       // 6. Run the AI simulation with ENSEMBLE approach for high-recall brand detection
       // For ChatGPT, use ensemble (multiple runs) to reduce variance and false negatives
       // For other engines, use single run with dedicated brand extraction
-      const useEnsemble = engine === 'chatgpt' && ENSEMBLE_RUN_COUNT > 1;
+      // User can override ensemble run count via payload (validated to 1-15 range in ensemble-simulation.ts)
+      const effectiveRunCount = ensemble_run_count ?? ENSEMBLE_RUN_COUNT;
+      const useEnsemble = engine === 'chatgpt' && effectiveRunCount > 1;
       
       console.log(`Running ${useEnsemble ? 'ensemble' : 'single'} simulation for "${promptText}" on ${engine} (region: ${region})`);
       
@@ -299,17 +362,18 @@ export const checkPromptVisibility = task({
       
       if (useEnsemble) {
         // ENSEMBLE MODE: Multiple runs aggregated for accuracy
-        console.log(`[Ensemble] Running ${ENSEMBLE_RUN_COUNT} simulations for high-recall brand detection (mode: ${modeLabel})...`);
+        console.log(`[Ensemble] Running ${effectiveRunCount} simulations for high-recall brand detection (mode: ${modeLabel})...`);
         
         const ensembleResult = await runEnsembleSimulation({
           engine: engine as SupportedEngine,
           keyword: promptText,
-          language: language as SupportedLanguage,
+          language: effectiveLanguage,
           region,
           brand_domain: brand.domain,
           target_brand: targetBrand,
-          run_count: ENSEMBLE_RUN_COUNT,
+          run_count: effectiveRunCount,
           simulation_mode: simulation_mode as BrowserSimulationMode,
+          enable_variance_metrics,
         });
         
         // Use representative answer for display
@@ -358,8 +422,18 @@ export const checkPromptVisibility = task({
             source_frequency: b.source_frequency,
             confidence: b.frequency >= 0.6 ? "high" : b.frequency >= 0.3 ? "medium" : "low",
           })),
-          brand_variance: 0, // TODO: Calculate from run variance
+          brand_variance: ensembleResult.variance_metrics?.brand_variance ?? 0,
           notes: ensembleResult.notes,
+          // Include variance metrics when enabled
+          variance_metrics: ensembleResult.variance_metrics ? {
+            run_count: ensembleResult.total_runs,
+            successful_runs: ensembleResult.successful_runs,
+            brand_variance: ensembleResult.variance_metrics.brand_variance,
+            confidence_interval: ensembleResult.variance_metrics.confidence_interval,
+            statistical_significance: ensembleResult.variance_metrics.statistical_significance,
+            p_value: ensembleResult.variance_metrics.p_value,
+            standard_error: ensembleResult.variance_metrics.standard_error,
+          } : undefined,
         };
         
         console.log(`[Ensemble] Complete: ${ensembleResult.successful_runs}/${ensembleResult.total_runs} runs`);
@@ -370,7 +444,7 @@ export const checkPromptVisibility = task({
         const singleResult = await runSingleSimulationWithExtraction({
           engine: engine as SupportedEngine,
           keyword: promptText,
-          language: language as SupportedLanguage,
+          language: effectiveLanguage,
           region,
           brand_domain: brand.domain,
           target_brand: targetBrand,
@@ -397,77 +471,37 @@ export const checkPromptVisibility = task({
         brand.name // Pass brand name for better detection
       );
       
-      console.log(`Visibility check: ${visibilityCheck.isVisible ? 'VISIBLE' : 'NOT VISIBLE'}`, 
-        visibilityCheck.mentions.length > 0 ? `Mentions: ${visibilityCheck.mentions.join(', ')}` : '');
+    logger.info("Visibility check", { visible: visibilityCheck.isVisible, mentions: visibilityCheck.mentions });
       
       // If ensemble says possible but simple check says visible, upgrade confidence
       if (ensembleData && visibilityCheck.isVisible && presenceLevel === "possible_present") {
         console.log(`Upgrading presence level: simple check confirms visibility`);
       }
 
-      // 8. Run full selection signal analysis
-      const selectionSignals = await analyzeSelectionSignals({
-        answer_html: simulationResult.answer_html,
-        answer_text: (simulationResult as { answer_text?: string }).answer_text,
-        search_context: simulationResult.search_context || null,
-        brand_domain: brand.domain,
-        brand_aliases: brand.brand_aliases || [],
-        engine: engine as SupportedEngine,
-        keyword: promptText, // Use processed prompt
-      });
-
-      // 9. Calculate enhanced AEO score (with ground truth when available)
-      const brandSettings = (brand.settings || {}) as Record<string, unknown>;
-      const aeoScore = await calculateAEOScore({
-        answer_html: simulationResult.answer_html,
-        brand_name: brand.name,
-        brand_domain: brand.domain,
-        brand_aliases: brand.brand_aliases || [],
-        brand_description: brandSettings.product_description as string | undefined,
-        brand_industry: brandSettings.industry as string | undefined,
-        competitor_names: brandSettings.competitors as string[] | undefined,
-        sources: simulationResult.sources || [],
-        citations: simulationResult.sources?.map(s => s.url) || [],
-        ground_truth_content: groundTruthContent, // Enhanced with crawled content
-      });
-
-      console.log(`AEO Score: ${aeoScore.total_score}/${59} (normalized: ${aeoScore.normalized_score}/100)`);
-      console.log(`  - Brand Mention: ${aeoScore.breakdown.brand_mention.score}/${aeoScore.breakdown.brand_mention.max} (${aeoScore.breakdown.brand_mention.match_type})`);
-      console.log(`  - Accuracy: ${aeoScore.breakdown.accuracy_context.score}/${aeoScore.breakdown.accuracy_context.max} (${aeoScore.breakdown.accuracy_context.quality})`);
-      console.log(`  - Attribution: ${aeoScore.breakdown.attribution.score}/${aeoScore.breakdown.attribution.max}`);
-      console.log(`  - Comparative: ${aeoScore.breakdown.comparative_position.score}/${aeoScore.breakdown.comparative_position.max} (${aeoScore.breakdown.comparative_position.position})`);
-      if (aeoScore.penalties.misattribution_risk.risk_detected) {
-        console.log(`  - ⚠️ Penalty: ${aeoScore.penalties.misattribution_risk.penalty} (misattribution detected)`);
+      // 8. Queue heavy analysis asynchronously (selection signals + AEO + optional watchdog)
+      // Best-effort stage updates (safe during schema cache rollout)
+      try {
+        await supabase
+          .from("simulations")
+          .update({
+            analysis_stage: `enrichment_queued:${engine}`,
+            enrichment_status: "queued",
+          })
+          .eq("id", simulationId);
+      } catch {
+        // best-effort during schema rollout
       }
 
-      // Attach AEO score to selection signals
-      selectionSignals.aeo_score = aeoScore;
-
-      // 9.1 ENHANCED SENTIMENT ANALYSIS
-      let sentimentAnalysis = null;
-      let netSentimentScore: number | null = null;
-      
-      if (visibilityCheck.isVisible) {
-        console.log(`📊 Running enhanced sentiment analysis...`);
-        try {
-          sentimentAnalysis = await analyzeSentiment(
-            simulationResult.answer_html,
-            brand.name,
-            brand.domain
-          );
-          netSentimentScore = sentimentAnalysis.net_sentiment_score;
-          selectionSignals.sentiment_analysis = sentimentAnalysis;
-          
-          console.log(`Sentiment: ${sentimentAnalysis.label} (NSS: ${netSentimentScore})`);
-          if (sentimentAnalysis.concerns?.length) {
-            console.log(`  ⚠️ Concerns: ${sentimentAnalysis.concerns.slice(0, 2).join(", ")}`);
-          }
-        } catch (sentimentError) {
-          console.warn("Sentiment analysis failed:", sentimentError);
+      await tasks.trigger(
+        "enrich-simulation",
+        { simulation_id: simulationId, enable_hallucination_watchdog },
+        {
+          idempotencyKey: `enrich-${simulationId}`,
+          ...(childVersion ? { version: childVersion } : {}),
         }
-      }
+      );
 
-      // 9.2 CITATION AUTHORITY MAPPING
+      // 9. Citation Authority Mapping (cheap, keep in core path)
       let citationAuthorities: CitationAuthority[] = [];
       
       if (simulationResult.standardized?.sources) {
@@ -478,183 +512,29 @@ export const checkPromptVisibility = task({
           source_type: source.source_type || 'editorial',
           is_brand_domain: source.is_brand_match,
         }));
-        selectionSignals.citation_authorities = citationAuthorities;
-        
         const brandCitations = citationAuthorities.filter(c => c.is_brand_domain).length;
         console.log(`📚 Citation Authority: ${citationAuthorities.length} sources, ${brandCitations} brand citations`);
       }
 
-      // 9.3 GROUNDING METADATA
-      if (simulationResult.search_context?.grounding_metadata) {
-        selectionSignals.grounding_metadata = simulationResult.search_context.grounding_metadata;
-        const gm = simulationResult.search_context.grounding_metadata;
-        if (gm.web_search_queries?.length) {
-          console.log(`🔍 Gemini ran ${gm.web_search_queries.length} search queries: ${gm.web_search_queries.slice(0, 2).join(", ")}`);
-        }
-        if (gm.x_posts?.length) {
-          console.log(`🐦 Grok used ${gm.x_posts.length} X posts`);
-        }
-      }
-
-      // 9.5 HALLUCINATION WATCHDOG (Pro+ Feature) - Only run when enabled
-      let hallucinationResult: HallucinationResult | undefined;
-      
-      // Log the flag value explicitly for debugging
-      console.log(`🐕 Hallucination Watchdog: enabled=${enable_hallucination_watchdog}, hasGroundTruth=${!!structuredGroundTruth}`);
-      
-      if (enable_hallucination_watchdog && structuredGroundTruth) {
-        console.log(`🐕 Hallucination Watchdog RUNNING - Starting detection...`);
-        
-        // Full AI-powered hallucination detection
-        hallucinationResult = await detectHallucinations(
-          simulationResult.answer_html,
-          structuredGroundTruth,
-          brand.name,
-          brand.domain
-        );
-        
-        // Also check for negative hallucination (AI refuses to answer but data exists)
-        const negativeHallucination = detectNegativeHallucination(
-          simulationResult.answer_html,
-          structuredGroundTruth
-        );
-        
-        if (negativeHallucination) {
-          hallucinationResult.hallucinations.push(negativeHallucination);
-          hallucinationResult.has_hallucinations = true;
-        }
-        
-        if (hallucinationResult.has_hallucinations) {
-          console.log(`⚠️ HALLUCINATIONS DETECTED: ${hallucinationResult.hallucinations.length} issues found`);
-          hallucinationResult.hallucinations.forEach((h, i) => {
-            console.log(`  ${i + 1}. [${h.type.toUpperCase()}] ${h.claim.slice(0, 100)}...`);
-          });
-        } else {
-          console.log(`✓ No hallucinations detected (accuracy: ${hallucinationResult.accuracy_score}%)`);
-        }
-        
-        // Attach hallucination results to selection signals (kept separate from other metrics)
-        (selectionSignals as unknown as Record<string, unknown>).hallucination_watchdog = {
-          enabled: true,
-          result: hallucinationResult,
-        };
-        
-        // If hallucinations were found, generate Schema fixes and add enhanced recommendations
-        if (hallucinationResult.has_hallucinations) {
-          const brandSettings = brand.settings as Record<string, unknown> || {};
-          
-          const enhancedActionItems = hallucinationResult.hallucinations.map((h: DetectedHallucination) => {
-            // Generate Schema fix for this hallucination
-            const schemaFix = generateSchemaFix(h, {
-              name: brand.name,
-              domain: brand.domain,
-              description: brandSettings.product_description as string,
-              industry: brandSettings.industry as string,
-              services: structuredGroundTruth?.services,
-              products: structuredGroundTruth?.products,
-              pricing: structuredGroundTruth?.pricing,
-            }, structuredGroundTruth);
-            
-            // Attach schema fix to the hallucination recommendation
-            if (schemaFix) {
-              h.recommendation.schema_fix = schemaFix;
-            }
-            
-            return {
-              priority: (h.severity === "critical" ? "high" : h.severity === "major" ? "medium" : "foundational") as ActionItem["priority"],
-              category: "content" as const,
-              title: h.recommendation.title,
-              description: h.recommendation.description,
-              steps: [h.recommendation.specific_fix],
-            };
-          });
-          
-          // Prepend hallucination fixes to action items
-          selectionSignals.action_items = [
-            ...enhancedActionItems,
-            ...(selectionSignals.action_items || []),
-          ];
-        }
-      } else if (!enable_hallucination_watchdog) {
-        // Mark that watchdog was not enabled for this simulation
-        (selectionSignals as unknown as Record<string, unknown>).hallucination_watchdog = {
-          enabled: false,
-          result: null,
-        };
-      } else {
-        // enable_hallucination_watchdog is true but no ground truth data available
-        // Mark as enabled but with no result (so UI knows it was enabled but couldn't run)
-        console.log(`⚠️ Hallucination Watchdog ENABLED but no ground truth data available`);
-        (selectionSignals as unknown as Record<string, unknown>).hallucination_watchdog = {
-          enabled: true,
-          result: null,
-          no_ground_truth: true,
-        };
-      }
-
-      // 10. ENHANCE WITH TIERED, ENGINE-SPECIFIC RECOMMENDATIONS
-      console.log(`📋 Generating ${engine}-specific recommendations...`);
-      
-      // Extract crawl analysis from ground truth summary (from Firecrawl)
-      const groundTruthSummary = brand.ground_truth_summary as {
-        crawl_analysis?: CrawlAnalysis;
-      } | null;
-      
-      let crawlAnalysis = groundTruthSummary?.crawl_analysis;
-      
-      if (crawlAnalysis) {
-        console.log(`📊 Using crawl analysis (${crawlAnalysis.summary.total_pages_analyzed} pages):`);
-        console.log(`  🔴 Critical: ${crawlAnalysis.summary.critical_issues.length}`);
-        console.log(`  🟠 High: ${crawlAnalysis.summary.high_priority_issues.length}`);
-        console.log(`  🟡 Medium: ${crawlAnalysis.summary.medium_priority_issues.length}`);
-      } else {
-        console.log(`⚠️ No crawl analysis available - attempting auto-crawl...`);
-        
-        // AUTO-CRAWL: Trigger website crawl if no crawl data exists
-        crawlAnalysis = await triggerAutoCrawlIfNeeded(supabase, brand_id, brand) ?? undefined;
-        
-        if (crawlAnalysis) {
-          console.log(`✓ Auto-crawl completed! Using fresh crawl data.`);
-        } else {
-          console.log(`⚠️ Auto-crawl not available - only generic suggestions will be generated`);
-        }
-      }
-
-      // Enhance selection signals with tiered recommendations
-      const enhancedSignals = enhanceWithTieredRecommendations({
-        selectionSignals,
-        brandName: brand.name,
-        brandDomain: brand.domain,
-        query: promptText,
-        engine: engine as SupportedEngine,
-        crawlAnalysis,
-      });
-
-      // Extract quick wins for easy access
-      const quickWins = enhancedSignals.tiered_recommendations 
-        ? extractQuickWins(enhancedSignals.tiered_recommendations)
-        : [];
-      
-      if (quickWins.length > 0) {
-        enhancedSignals.quick_wins = quickWins;
-      }
-
-      console.log(`✓ Generated ${enhancedSignals.tiered_recommendations?.length || 0} tiered recommendations`);
-      if (enhancedSignals.tiered_recommendations) {
-        const tierCounts = {
-          foundational: enhancedSignals.tiered_recommendations.filter(r => r.tier === 'foundational').length,
-          high: enhancedSignals.tiered_recommendations.filter(r => r.tier === 'high').length,
-          medium: enhancedSignals.tiered_recommendations.filter(r => r.tier === 'medium').length,
-          'nice-to-have': enhancedSignals.tiered_recommendations.filter(r => r.tier === 'nice-to-have').length,
-        };
-        console.log(`  Tiers: Foundational=${tierCounts.foundational}, High=${tierCounts.high}, Medium=${tierCounts.medium}, Nice-to-have=${tierCounts['nice-to-have']}`);
-        
-        // Log platform-specific recommendations
-        const platformRecs = enhancedSignals.tiered_recommendations.filter(r => r.engine === engine);
-        if (platformRecs.length > 0) {
-          console.log(`  Platform-specific (${engine}): ${platformRecs.length} recommendations`);
-        }
-      }
+      const enhancedSignals = {
+        is_visible: visibilityCheck.isVisible,
+        sentiment: visibilityCheck.isVisible ? ("neutral" as const) : ("negative" as const),
+        // Keep more sources so the UI can render a complete Citation Authority Map.
+        // (We still cap to avoid huge payloads.)
+        winning_sources: Array.from(new Set((simulationResult.sources || []).map((s) => s.url))).slice(0, 25),
+        gap_analysis: {
+          structure_score: 3,
+          data_density_score: 3,
+          directness_score: 3,
+          authority_score: 3,
+          crawlability_score: 3,
+        },
+        recommendation: "Enriching analysis…",
+        action_items: [],
+        competitor_insights: "",
+        quick_wins: [],
+        analysis_partial: true,
+      } as unknown as SelectionSignals;
 
       // IMPROVED VISIBILITY LOGIC:
       // 1. If ensemble mode: use presence_level from ensemble
@@ -671,8 +551,8 @@ export const checkPromptVisibility = task({
         
         console.log(`[Visibility] Ensemble-based: ${presenceLevel} (${Math.round(visibilityFrequency * 100)}%)`);
       } else {
-        // Single mode: use OR logic
-        isVisible = visibilityCheck.isVisible || enhancedSignals.is_visible;
+        // Single mode: base visibility purely on deterministic checks (final enrichment runs async)
+        isVisible = visibilityCheck.isVisible;
         visibilityStatement = isVisible 
           ? `${brand.name} was detected in the AI response`
           : `${brand.name} was not detected in the AI response`;
@@ -697,15 +577,37 @@ export const checkPromptVisibility = task({
             visibility_confidence: visibilityConfidence,
             visibility_frequency: visibilityFrequency,
             visibility_statement: visibilityStatement,
+            visibility_contract_version: VISIBILITY_CONTRACT_VERSION,
+            simulation_pipeline_version: SIMULATION_PIPELINE_VERSION,
+            meta: {
+              engine,
+              provider: "api",
+              model:
+                engine === "chatgpt" ? "openai" :
+                engine === "gemini" ? "gemini-2.0-flash" :
+                engine === "grok" ? "grok-4-1-fast-reasoning" :
+                engine === "perplexity" ? "sonar-pro" :
+                undefined,
+              simulation_mode: simulation_mode as SimulationMode,
+            },
+            visibility: {
+              visible_in_text: visibilityCheck.mentions.length > 0,
+              visible_in_sources: citationAuthorities.some((c) => c.is_brand_domain),
+              visible_probability: ensembleData?.target_visibility?.visibility_frequency ?? (isVisible ? 1 : 0),
+              reason: visibilityCheck.mentions.length > 0 ? "mentioned_in_text" : citationAuthorities.some((c) => c.is_brand_domain) ? "cited_in_sources" : isVisible ? "detected" : "absent",
+            },
           },
           status: "completed",
           error_message: null,
           // NEW: Enhanced fields
           standardized_result: (simulationResult as { standardized?: unknown }).standardized || null,
-          sentiment_analysis: sentimentAnalysis || null,
-          net_sentiment_score: netSentimentScore,
+          sentiment_analysis: null,
+          net_sentiment_score: null,
           grounding_metadata: simulationResult.search_context?.grounding_metadata || null,
           citation_authorities: citationAuthorities.length > 0 ? citationAuthorities : null,
+          // Best-effort: these columns may not exist yet (schema cache rollout)
+          analysis_stage: `simulated:${engine}`,
+          enrichment_status: "queued",
         })
         .eq("id", simulationId);
 
@@ -713,21 +615,36 @@ export const checkPromptVisibility = task({
         console.error("Failed to update simulation:", updateError);
       }
 
-      // 12. Update prompt last_checked_at
-      await supabase
-        .from("prompts")
-        .update({ last_checked_at: new Date().toISOString() })
-        .eq("id", prompt_id);
-
-      // 13. Deduct credit (only if we have credits)
-      if (organization.credits_balance > 0) {
-        await supabase.rpc("deduct_credit", { org_id: organization.id });
+      // Update prompt last_checked_at (best-effort)
+      try {
+        await supabase
+          .from("prompts")
+          .update({ last_checked_at: new Date().toISOString() })
+          .eq("id", prompt_id);
+      } catch {
+        // ignore
       }
 
-      console.log(`✓ Simulation completed: ${engine} for "${promptText}"`);
-      console.log(`  Visibility: ${isVisible} (${presenceLevel}, ${Math.round(visibilityFrequency * 100)}% confidence)`);
-      console.log(`  Statement: ${visibilityStatement}`);
-      console.log(`  Recommendation: ${enhancedSignals.recommendation?.slice(0, 100)}...`);
+      // Increment batch progress (best-effort). This makes the parent orchestration non-blocking.
+      try {
+        await supabase.rpc("increment_batch_completed", { batch_id: analysis_batch_id });
+      } catch {
+        // ignore (RPC may not exist in some environments)
+      }
+
+      // 12. Deduct credit (only if we have credits)
+      const creditsBalance = (organization as { credits_balance?: number } | null | undefined)?.credits_balance;
+      const orgId = (organization as { id?: string } | null | undefined)?.id;
+      if (typeof creditsBalance === "number" && creditsBalance > 0 && typeof orgId === "string") {
+        await supabase.rpc("deduct_credit", { org_id: orgId });
+      }
+
+      logger.info("Simulation completed", {
+        visible: isVisible,
+        presenceLevel,
+        visibilityFrequency,
+        visibilityStatement,
+      });
 
       return {
         prompt_id,
@@ -750,7 +667,7 @@ export const checkPromptVisibility = task({
 
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : String(error);
-      console.error(`✗ Simulation failed: ${engine} for "${promptText}" - ${errorMsg}`);
+      logger.error("Simulation failed", { error: errorMsg });
       
       // Update simulation as failed
       await supabase
@@ -758,8 +675,36 @@ export const checkPromptVisibility = task({
         .update({
           status: "failed",
           error_message: errorMsg,
+          enrichment_status: "failed",
+          enrichment_error: errorMsg,
+          analysis_stage: `failed:${engine}`,
         })
         .eq("id", simulationId);
+
+      // Count failures as completed work for batch progress (best-effort)
+      try {
+        await supabase.rpc("increment_batch_completed", { batch_id: analysis_batch_id });
+      } catch {
+        // ignore
+      }
+
+      // Kick finalization debounce so batch can complete once all enrichment is done/failed
+      try {
+        await tasks.trigger(
+          "finalize-analysis-batch",
+          { analysis_batch_id },
+          {
+            debounce: {
+              key: `finalize-${analysis_batch_id}`,
+              delay: "5s",
+              mode: "trailing",
+            },
+            ...(childVersion ? { version: childVersion } : {}),
+          }
+        );
+      } catch {
+        // ignore
+      }
 
       throw error;
     }
@@ -776,6 +721,7 @@ export const checkPromptVisibility = task({
  * 
  * Returns crawl analysis if successful, null otherwise.
  */
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 async function triggerAutoCrawlIfNeeded(
   supabase: ReturnType<typeof getSupabase>,
   brandId: string,

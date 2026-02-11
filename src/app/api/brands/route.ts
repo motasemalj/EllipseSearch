@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { BillingTier, TIER_LIMITS } from "@/types";
 import { isTrialExpired } from "@/lib/subscription";
+import { createClient as createAdminClient } from "@supabase/supabase-js";
 
 /**
  * POST /api/brands
@@ -10,6 +11,10 @@ import { isTrialExpired } from "@/lib/subscription";
 export async function POST(request: NextRequest) {
   try {
     const supabase = await createClient();
+    const supabaseAdmin = createAdminClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY!
+    );
 
     // Check authentication
     const {
@@ -125,6 +130,76 @@ export async function POST(request: NextRequest) {
         { error: createError.message },
         { status: 500 }
       );
+    }
+
+    // If auto-analysis is enabled, set up the new daily analyses system
+    // This uses the simplified daily_analyses_enabled field and creates 3 daily slots
+    try {
+      const settingsObj = (settings || {}) as Record<string, unknown>;
+      const autoEnabled = Boolean(settingsObj.auto_analysis_enabled);
+      
+      if (autoEnabled) {
+        const now = new Date();
+        
+        // Calculate 3 daily slots at 8-hour intervals from now
+        const slots = [
+          { slot_number: 1, time: new Date(now) },
+          { slot_number: 2, time: new Date(now.getTime() + 8 * 60 * 60 * 1000) },
+          { slot_number: 3, time: new Date(now.getTime() + 16 * 60 * 60 * 1000) },
+        ];
+        
+        // Update brand with daily analyses settings
+        await supabaseAdmin
+          .from("brands")
+          .update({
+            daily_analyses_enabled: true,
+            daily_schedule_anchor_time: now.toISOString(),
+            next_daily_run_at: slots[0].time.toISOString(),
+            analysis_engines: settingsObj.analysis_engines || ["chatgpt", "perplexity", "gemini", "grok"],
+            analysis_regions: settingsObj.analysis_regions || ["ae"],
+          })
+          .eq("id", brand.id);
+        
+        // Create daily analysis slots for today and tomorrow
+        for (const slot of slots) {
+          await supabaseAdmin
+            .from("daily_analysis_slots")
+            .insert({
+              brand_id: brand.id,
+              slot_number: slot.slot_number,
+              scheduled_time: slot.time.toISOString(),
+              status: "scheduled",
+            })
+            .select()
+            .maybeSingle(); // Ignore duplicates
+        }
+        
+        // Create tomorrow's slots too
+        const tomorrowAnchor = new Date(now.getTime() + 24 * 60 * 60 * 1000);
+        const tomorrowSlots = [
+          { slot_number: 1, time: new Date(tomorrowAnchor) },
+          { slot_number: 2, time: new Date(tomorrowAnchor.getTime() + 8 * 60 * 60 * 1000) },
+          { slot_number: 3, time: new Date(tomorrowAnchor.getTime() + 16 * 60 * 60 * 1000) },
+        ];
+        
+        for (const slot of tomorrowSlots) {
+          await supabaseAdmin
+            .from("daily_analysis_slots")
+            .insert({
+              brand_id: brand.id,
+              slot_number: slot.slot_number,
+              scheduled_time: slot.time.toISOString(),
+              status: "scheduled",
+            })
+            .select()
+            .maybeSingle();
+        }
+        
+        console.log(`[Brand Create] Set up daily analyses for brand ${brand.id}`);
+      }
+    } catch (scheduleError) {
+      console.error("Daily analyses setup error:", scheduleError);
+      // Best-effort: don't fail brand creation if daily analyses setup fails
     }
 
     return NextResponse.json({

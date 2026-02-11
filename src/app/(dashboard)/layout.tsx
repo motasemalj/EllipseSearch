@@ -10,27 +10,25 @@ export default async function DashboardLayout({
 }: {
   children: React.ReactNode;
 }) {
-  // Use cached user fetching - this is deduplicated across all server components in the request
   const user = await getCurrentUser();
 
   if (!user) {
     redirect("/login");
   }
 
-  // Use cached profile fetching - deduplicated and reused
   const profile = await getUserProfile(user.id);
   const organization = profile?.organizations as { credits_balance?: number } | null;
 
   return (
     <div className="min-h-screen bg-background">
-      {/* Subscription Banner - shows trial warnings, expired trials, low credits */}
+      {/* Subscription Banner */}
       <SubscriptionBanner />
       
       {/* Sidebar */}
       <Sidebar />
 
-      {/* Main Content - with left margin for sidebar */}
-      <div className="lg:ml-64 min-h-screen flex flex-col">
+      {/* Main Content */}
+      <div className="lg:ml-60 min-h-screen flex flex-col">
         <Header 
           user={{ email: user.email }} 
           credits={organization?.credits_balance ?? 0}

@@ -150,7 +150,19 @@ export async function POST(request: NextRequest) {
       }
     }
     
-    const body = await request.json();
+    // Heartbeats come from a Python worker; occasionally we can get an empty/partial body
+    // (client timeout / connection reset). Never throw a 500 here; return a clean 400.
+    const raw = await request.text();
+    if (!raw || raw.trim().length === 0) {
+      return NextResponse.json({ error: "Empty heartbeat body" }, { status: 400 });
+    }
+
+    let body: any;
+    try {
+      body = JSON.parse(raw);
+    } catch {
+      return NextResponse.json({ error: "Invalid JSON heartbeat body" }, { status: 400 });
+    }
     const { 
       worker_id, 
       chrome_connected = true, 

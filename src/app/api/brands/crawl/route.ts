@@ -69,7 +69,9 @@ export async function POST(request: NextRequest) {
       .select("id, status")
       .eq("brand_id", brand_id)
       .in("status", ["pending", "crawling"])
-      .single();
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
 
     if (existingCrawl) {
       return NextResponse.json(

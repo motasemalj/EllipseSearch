@@ -27,6 +27,7 @@ import {
   MoreVertical,
   Calendar,
   Repeat,
+  ChevronDown,
 } from "lucide-react";
 import { ChatGPTIcon, PerplexityIcon, GeminiIcon, GrokIcon } from "@/components/ui/engine-badge";
 import {
@@ -118,6 +119,9 @@ export function BrandPromptsList({ brandId, prompts }: BrandPromptsListProps) {
   const [promptToDelete, setPromptToDelete] = useState<PromptWithStats | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
   const [schedule, setSchedule] = useState<string>("none");
+  const [ensembleRunCount, setEnsembleRunCount] = useState<number>(3);
+  const [showAdvancedOptions, setShowAdvancedOptions] = useState(false);
+  const [enableVarianceMetrics, setEnableVarianceMetrics] = useState(false);
 
   // Fetch running prompt IDs and track completions
   useEffect(() => {
@@ -492,6 +496,8 @@ export function BrandPromptsList({ brandId, prompts }: BrandPromptsListProps) {
           region,
           enable_hallucination_watchdog: canUseWatchdog && enableWatchdog,
           schedule: schedule !== "none" ? schedule : undefined,
+          ensemble_run_count: ensembleRunCount,
+          enable_variance_metrics: enableVarianceMetrics,
         }),
       });
 
@@ -918,6 +924,89 @@ export function BrandPromptsList({ brandId, prompts }: BrandPromptsListProps) {
                   ))}
                 </SelectContent>
               </Select>
+            </div>
+
+            {/* Advanced Options - Ensemble Frequency */}
+            <div className="space-y-2">
+              <button
+                type="button"
+                onClick={() => setShowAdvancedOptions(!showAdvancedOptions)}
+                className="flex items-center gap-2 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors"
+              >
+                <BarChart3 className="w-4 h-4" />
+                Advanced Options
+                <ChevronDown className={`w-4 h-4 transition-transform ${showAdvancedOptions ? 'rotate-180' : ''}`} />
+              </button>
+              
+              {showAdvancedOptions && (
+                <div className="space-y-3 p-3 rounded-lg border border-border bg-muted/30">
+                  {/* Ensemble Frequency */}
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <Label className="text-xs font-medium">Ensemble Simulations</Label>
+                        <p className="text-[10px] text-muted-foreground">
+                          Multiple runs improve accuracy
+                        </p>
+                      </div>
+                      <span className="px-2 py-0.5 rounded-full bg-primary/10 text-primary text-xs font-medium">
+                        {ensembleRunCount} runs
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="range"
+                        min={1}
+                        max={10}
+                        value={ensembleRunCount}
+                        onChange={(e) => setEnsembleRunCount(parseInt(e.target.value))}
+                        className="flex-1 h-2 bg-muted rounded-lg appearance-none cursor-pointer accent-primary"
+                      />
+                      <div className="flex gap-1 text-[10px] text-muted-foreground">
+                        <span>1</span>
+                        <span>—</span>
+                        <span>10</span>
+                      </div>
+                    </div>
+                    <p className="text-[10px] text-muted-foreground">
+                      {ensembleRunCount === 1 && "Single run - fastest"}
+                      {ensembleRunCount >= 2 && ensembleRunCount <= 3 && "Standard - good balance"}
+                      {ensembleRunCount >= 4 && ensembleRunCount <= 6 && "High accuracy"}
+                      {ensembleRunCount >= 7 && "Maximum accuracy"}
+                    </p>
+                  </div>
+
+                  {/* Enable Variance Metrics */}
+                  {ensembleRunCount >= 3 && (
+                    <button
+                      type="button"
+                      onClick={() => setEnableVarianceMetrics(!enableVarianceMetrics)}
+                      className={`w-full flex items-center gap-3 p-2 rounded-md border transition-all text-left ${
+                        enableVarianceMetrics
+                          ? "border-primary bg-primary/10"
+                          : "border-border hover:border-primary/50"
+                      }`}
+                    >
+                      <div className={`p-1.5 rounded-md ${enableVarianceMetrics ? "bg-primary/20" : "bg-muted"}`}>
+                        <BarChart3 className={`w-3.5 h-3.5 ${enableVarianceMetrics ? "text-primary" : "text-muted-foreground"}`} />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-xs font-medium">Statistical Significance</p>
+                        <p className="text-[10px] text-muted-foreground">
+                          Show confidence intervals & p-values
+                        </p>
+                      </div>
+                      <div className={`w-8 h-4 rounded-full transition-colors flex-shrink-0 ${
+                        enableVarianceMetrics ? "bg-primary" : "bg-muted"
+                      }`}>
+                        <div className={`w-3 h-3 rounded-full bg-white shadow-sm transform transition-transform mt-0.5 ${
+                          enableVarianceMetrics ? "translate-x-4 ml-0.5" : "translate-x-0.5"
+                        }`} />
+                      </div>
+                    </button>
+                  )}
+                </div>
+              )}
             </div>
 
             {/* Hallucination Watchdog Toggle */}

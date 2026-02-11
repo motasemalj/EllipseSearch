@@ -14,9 +14,13 @@ import {
   FileText,
   Newspaper,
   Star,
+  ListOrdered,
+  BarChart2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import type { CitationAuthority, StandardizedSource } from "@/types";
+
+type SortMode = "authority" | "order";
 
 interface CitationAuthorityPanelProps {
   sources: StandardizedSource[] | CitationAuthority[];
@@ -35,9 +39,10 @@ type NormalizedSource = {
   tier: string;
   source_type?: string;
   is_brand_match: boolean;
+  citation_order: number; // The order this source appeared in the AI response
 };
 
-function normalizeSource(s: StandardizedSource | CitationAuthority, brandDomain: string): NormalizedSource {
+function normalizeSource(s: StandardizedSource | CitationAuthority, brandDomain: string, index: number): NormalizedSource {
   const tier = 'tier' in s ? s.tier : ('authority_tier' in s ? s.authority_tier : undefined);
   
   // Enhanced brand domain matching
@@ -66,6 +71,7 @@ function normalizeSource(s: StandardizedSource | CitationAuthority, brandDomain:
     tier: tier || 'unknown',
     source_type: s.source_type,
     is_brand_match: !!isBrandMatch,
+    citation_order: index + 1, // 1-indexed for display
   };
 }
 
@@ -74,21 +80,27 @@ export function CitationAuthorityPanel({
   brandDomain,
   brandName,
   isBrandVisible = false,
-  maxDisplay = 8,
+  maxDisplay = 20,
 }: CitationAuthorityPanelProps) {
-  const [expanded, setExpanded] = useState(false);
+  // If the list is small, show everything by default.
+  const [expanded, setExpanded] = useState(() => (sources?.length ?? 0) <= maxDisplay);
+  const [sortMode, setSortMode] = useState<SortMode>("authority");
 
   if (!sources || sources.length === 0) {
     return null;
   }
 
-  // Normalize all sources
-  const normalizedSources = sources.map(s => normalizeSource(s, brandDomain));
+  // Normalize all sources (index preserves original order)
+  const normalizedSources = sources.map((s, i) => normalizeSource(s, brandDomain, i));
 
-  // Sort by authority score
-  const sortedSources = [...normalizedSources].sort((a, b) => 
-    b.authority_score - a.authority_score
-  );
+  // Sort based on selected mode
+  const sortedSources = [...normalizedSources].sort((a, b) => {
+    if (sortMode === "authority") {
+      return b.authority_score - a.authority_score;
+    } else {
+      return a.citation_order - b.citation_order;
+    }
+  });
   
   const displaySources = expanded ? sortedSources : sortedSources.slice(0, maxDisplay);
   
@@ -144,6 +156,32 @@ export function CitationAuthorityPanel({
               </p>
             </div>
           </div>
+          
+          {/* Sort mode toggle */}
+          <div className="flex gap-1 p-1 rounded-lg bg-muted/50">
+            <button
+              onClick={() => setSortMode("authority")}
+              className={`px-3 py-1.5 rounded-md text-sm font-medium flex items-center gap-1.5 transition-colors ${
+                sortMode === "authority"
+                  ? "bg-background text-foreground shadow-sm"
+                  : "text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              <BarChart2 className="w-3.5 h-3.5" />
+              Authority
+            </button>
+            <button
+              onClick={() => setSortMode("order")}
+              className={`px-3 py-1.5 rounded-md text-sm font-medium flex items-center gap-1.5 transition-colors ${
+                sortMode === "order"
+                  ? "bg-background text-foreground shadow-sm"
+                  : "text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              <ListOrdered className="w-3.5 h-3.5" />
+              Ranking
+            </button>
+          </div>
         </div>
 
         {/* Quick stats */}
@@ -182,9 +220,26 @@ export function CitationAuthorityPanel({
                 source.is_brand_match ? "bg-primary/5" : ""
               }`}
             >
-              {/* Rank */}
-              <div className="w-8 h-8 rounded-full bg-muted flex items-center justify-center text-sm font-medium text-muted-foreground shrink-0">
-                {i + 1}
+              {/* Rank indicator - shows position based on current sort mode */}
+              <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-medium shrink-0 ${
+                sortMode === "order" && source.citation_order <= 3
+                  ? source.citation_order === 1
+                    ? "bg-amber-500/20 text-amber-600 dark:text-amber-400"
+                    : source.citation_order === 2
+                    ? "bg-slate-400/20 text-slate-600 dark:text-slate-300"
+                    : "bg-orange-600/20 text-orange-600 dark:text-orange-400"
+                  : "bg-muted text-muted-foreground"
+              }`}>
+                {sortMode === "order" ? (
+                  // Show citation order with medal styling for top 3
+                  source.citation_order <= 3 ? (
+                    source.citation_order === 1 ? "🥇" :
+                    source.citation_order === 2 ? "🥈" : "🥉"
+                  ) : source.citation_order
+                ) : (
+                  // Show display index when sorting by authority
+                  i + 1
+                )}
               </div>
 
               {/* Source info */}
@@ -196,6 +251,12 @@ export function CitationAuthorityPanel({
                   {source.is_brand_match && (
                     <span className="px-1.5 py-0.5 rounded bg-primary/20 text-primary text-xs font-medium shrink-0">
                       Your Domain
+                    </span>
+                  )}
+                  {/* Show citation position badge when not in order mode */}
+                  {sortMode === "authority" && (
+                    <span className="px-1.5 py-0.5 rounded bg-muted text-muted-foreground text-xs shrink-0">
+                      #{source.citation_order} cited
                     </span>
                   )}
                 </div>
@@ -257,7 +318,7 @@ export function CitationAuthorityPanel({
             ) : (
               <>
                 <ChevronDown className="w-4 h-4" />
-                Show {sources.length - maxDisplay} More Sources
+                Show All Sources ({sources.length})
               </>
             )}
           </Button>

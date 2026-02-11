@@ -12,7 +12,12 @@
  */
 
 import OpenAI from "openai";
-import { OPENAI_CHAT_MODEL } from "@/lib/ai/openai-config";
+import { OPENAI_CHAT_MODEL, ANALYSIS_REASONING_EFFORT } from "@/lib/ai/openai-config";
+import type { SchemaFix } from "@/types";
+import { UNTRUSTED_CONTENT_POLICY } from "@/lib/ai/prompt-policies";
+import { callOpenAIResponses, extractOpenAIResponsesText } from "@/lib/ai/llm-runtime";
+import { LLM_TIMEOUTS_MS } from "@/lib/ai/openai-timeouts";
+import { HallucinationDetectionSchema, GROUND_TRUTH_RESPONSES_SCHEMA, GroundTruthExtractionSchema } from "@/lib/schemas/llm";
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
@@ -39,7 +44,10 @@ export interface GroundTruthData {
   
   // Raw crawled content for fallback
   raw_content: string;
-  crawled_pages: { url: string; title: string; excerpt: string }[];
+  crawled_pages: { url: string; title: string; excerpt: string; crawled_at?: string }[];
+  
+  // Metadata
+  extraction_timestamp?: string;
 }
 
 export interface PricingInfo {
@@ -60,8 +68,16 @@ export interface HallucinationResult {
   hallucinations: DetectedHallucination[];
   accuracy_score: number; // 0-100
   confidence: "high" | "medium" | "low";
-  summary: string; // Brief summary of the analysis
+  summary: string;
   analysis_notes: string[];
+  /** Ground truth freshness info */
+  ground_truth_freshness?: {
+    is_stale: boolean;
+    days_since_crawl: number;
+    recommendation?: string;
+  };
+  /** Optional provider usage metadata (tokens, etc.) */
+  llm_usage?: unknown;
 }
 
 export interface DetectedHallucination {
@@ -78,15 +94,83 @@ export interface EnhancedRecommendation {
   specific_fix: string; // Exact actionable fix based on crawler data
   affected_element?: string; // e.g., "H1 tag", "pricing page", "meta description"
   priority: "critical" | "high" | "medium" | "low";
+  schema_fix?: SchemaFix; // Optional JSON-LD/schema patch (if generated)
 }
 
 // ===========================================
-// Ground Truth Extraction
+// Ground Truth Freshness Check
+// ===========================================
+
+/** Default number of days after which ground truth is considered stale */
+const DEFAULT_STALE_THRESHOLD_DAYS = 30;
+
+/**
+ * Check if ground truth data is stale (older than threshold).
+ * Stale data may lead to false positives in hallucination detection.
+ */
+export function isGroundTruthStale(
+  groundTruth: GroundTruthData,
+  thresholdDays: number = DEFAULT_STALE_THRESHOLD_DAYS
+): { isStale: boolean; daysSinceCrawl: number; recommendation?: string } {
+  // Try to find the most recent crawl timestamp
+  let mostRecentCrawl: Date | null = null;
+  
+  // Check extraction timestamp first
+  if (groundTruth.extraction_timestamp) {
+    try {
+      mostRecentCrawl = new Date(groundTruth.extraction_timestamp);
+    } catch {
+      // Invalid date
+    }
+  }
+  
+  // Check individual page crawl dates
+  if (!mostRecentCrawl && groundTruth.crawled_pages?.length > 0) {
+    for (const page of groundTruth.crawled_pages) {
+      if (page.crawled_at) {
+        try {
+          const pageDate = new Date(page.crawled_at);
+          if (!mostRecentCrawl || pageDate > mostRecentCrawl) {
+            mostRecentCrawl = pageDate;
+          }
+        } catch {
+          // Invalid date
+        }
+      }
+    }
+  }
+  
+  // If no timestamp found, assume it's stale
+  if (!mostRecentCrawl) {
+    return {
+      isStale: true,
+      daysSinceCrawl: -1, // Unknown
+      recommendation: "Ground truth has no timestamp. Re-crawl the website to get fresh data.",
+    };
+  }
+  
+  const daysSinceCrawl = Math.floor(
+    (Date.now() - mostRecentCrawl.getTime()) / (1000 * 60 * 60 * 24)
+  );
+  
+  const isStale = daysSinceCrawl > thresholdDays;
+  
+  return {
+    isStale,
+    daysSinceCrawl,
+    recommendation: isStale 
+      ? `Ground truth is ${daysSinceCrawl} days old (threshold: ${thresholdDays}). Re-crawl the website for more accurate hallucination detection.`
+      : undefined,
+  };
+}
+
+// ===========================================
+// Ground Truth Extraction (Schema-Locked)
 // ===========================================
 
 /**
- * Extract structured ground truth data from crawled pages
- * This runs during the crawl job to pre-process the data
+ * Extract structured ground truth data from crawled pages.
+ * Uses Responses API with strict schema for reliable structured output.
  */
 export async function extractGroundTruthData(
   crawledPages: { url: string; title: string; markdown: string }[]
@@ -99,42 +183,69 @@ export async function extractGroundTruthData(
 
   const systemPrompt = `You are a data extraction expert. Extract structured information from website content.
 Focus on: pricing, features, products/services, company description, and key facts.
-Return valid JSON only.`;
+Only include fields where you found real data. Use empty arrays if not found.
+
+${UNTRUSTED_CONTENT_POLICY}`;
 
   const userPrompt = `Extract structured data from this website content:
 
 ${combinedContent}
 
-Return JSON with this structure:
-{
-  "pricing": [{ "plan_name": "...", "price": "...", "features": ["..."], "is_free": true/false }],
-  "features": ["feature1", "feature2"],
-  "products": ["product1", "product2"],
-  "services": ["service1", "service2"],
-  "company_description": "One paragraph description",
-  "tagline": "Main tagline if found",
-  "locations": ["location1"],
-  "certifications": ["cert1"],
-  "faq_content": ["Q: question A: answer"]
-}
-
-Only include fields where you found real data. Use empty arrays if not found.`;
+Extract:
+- pricing: Array of plans with name, price, features, is_free flag
+- features: Array of product/service features
+- products: Array of product names
+- services: Array of service offerings
+- company_description: One paragraph description (max 1000 chars)
+- tagline: Main tagline if found (max 200 chars)
+- locations: Array of office/service locations
+- certifications: Array of certifications/awards
+- faq_content: Array of Q&A pairs from FAQ pages`;
 
   try {
-    const response = await openai.chat.completions.create({
+    // Use Responses API with strict schema for reliable extraction
+    const { response } = await callOpenAIResponses({
+      client: openai,
+      provider: "openai",
       model: OPENAI_CHAT_MODEL,
-      messages: [
-        { role: "system", content: systemPrompt },
-        { role: "user", content: userPrompt },
-      ],
-      response_format: { type: "json_object" },
-      max_completion_tokens: 2000,
+      timeoutMs: LLM_TIMEOUTS_MS.groundTruthExtraction,
+      request: {
+        model: OPENAI_CHAT_MODEL,
+        input: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: userPrompt },
+        ],
+        reasoning: { effort: ANALYSIS_REASONING_EFFORT },
+        text: { 
+          verbosity: "low",
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          format: GROUND_TRUTH_RESPONSES_SCHEMA as Record<string, unknown>,
+        },
+        max_output_tokens: 3000,
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      } as Record<string, unknown>,
     });
 
-    const content = response.choices[0]?.message?.content;
-    if (!content) throw new Error("Empty response");
+    const content = extractOpenAIResponsesText(response);
+    if (!content) {
+      // Soft-fail: OpenAI can occasionally return empty output (e.g. incomplete max_output_tokens).
+      // Return minimal ground truth so downstream pipelines don't crash.
+      console.warn("[GroundTruth] Empty response from ground truth extraction (soft-fail)");
+      return {
+        raw_content: combinedContent,
+        crawled_pages: crawledPages.map(p => ({
+          url: p.url,
+          title: p.title,
+          excerpt: p.markdown?.slice(0, 500) || "",
+        })),
+        extraction_timestamp: new Date().toISOString(),
+      };
+    }
 
-    const extracted = JSON.parse(content);
+    const extractedRaw = JSON.parse(content);
+    
+    // Validate with Zod schema
+    const extracted = GroundTruthExtractionSchema.parse(extractedRaw);
 
     return {
       ...extracted,
@@ -143,7 +254,9 @@ Only include fields where you found real data. Use empty arrays if not found.`;
         url: p.url,
         title: p.title,
         excerpt: p.markdown?.slice(0, 500) || "",
+        crawled_at: new Date().toISOString(),
       })),
+      extraction_timestamp: new Date().toISOString(),
     };
   } catch (error) {
     console.error("[GroundTruth] Extraction failed:", error);
@@ -155,6 +268,7 @@ Only include fields where you found real data. Use empty arrays if not found.`;
         title: p.title,
         excerpt: p.markdown?.slice(0, 500) || "",
       })),
+      extraction_timestamp: new Date().toISOString(),
     };
   }
 }
@@ -175,6 +289,12 @@ export async function detectHallucinations(
 ): Promise<HallucinationResult> {
   const analysisNotes: string[] = [];
 
+  // Check ground truth freshness
+  const freshnessCheck = isGroundTruthStale(groundTruth);
+  if (freshnessCheck.isStale) {
+    analysisNotes.push(`⚠️ Ground truth may be stale (${freshnessCheck.daysSinceCrawl} days old)`);
+  }
+
   // Build ground truth summary for comparison
   const groundTruthSummary = buildGroundTruthSummary(groundTruth);
   
@@ -186,6 +306,11 @@ export async function detectHallucinations(
       confidence: "low",
       summary: "Insufficient website data for hallucination detection. Run another analysis after website crawl completes.",
       analysis_notes: ["Insufficient ground truth data for comparison"],
+      ground_truth_freshness: {
+        is_stale: true,
+        days_since_crawl: freshnessCheck.daysSinceCrawl,
+        recommendation: freshnessCheck.recommendation,
+      },
     };
   }
 
@@ -205,16 +330,7 @@ CRITICAL RULES FOR DETECTION:
 5. ONLY flag claims that are materially wrong and could mislead a customer
 6. When in doubt, DO NOT flag it - err on the side of giving the AI credit
 
-Examples of what IS a hallucination:
-- AI says "free plan available" when there is no free plan
-- AI says "24/7 phone support" when only email support exists
-- AI says "founded in 2010" when founded in 2020
-
-Examples of what is NOT a hallucination:
-- AI says "competitive pricing" without mentioning exact prices
-- AI says "various service options" without listing every service
-- AI rounds or approximates numbers within reasonable bounds
-- AI uses different wording to describe the same thing`;
+${UNTRUSTED_CONTENT_POLICY}`;
 
   const userPrompt = `Analyze this AI response about "${brandName}" (${brandDomain}) for SIGNIFICANT hallucinations only:
 
@@ -226,51 +342,138 @@ ${groundTruthSummary}
 
 ---
 
-Compare the AI response against the ground truth and return JSON:
-{
-  "has_hallucinations": true/false,
-  "accuracy_score": 0-100,
-  "confidence": "high"/"medium"/"low",
-  "summary": "Brief summary of the analysis - if no hallucinations, say 'No significant hallucinations detected. The AI response is accurate.'",
-  "hallucinations": [
-    {
-      "type": "positive"/"negative"/"misattribution"/"outdated",
-      "severity": "critical"/"major"/"minor",
-      "claim": "What the AI said (exact quote if possible)",
-      "reality": "What the ground truth shows",
-      "affected_element": "Which website element needs fixing (e.g., 'H1 tag', 'pricing page', 'meta description')",
-      "specific_fix": "Exact actionable fix (e.g., 'Change H1 from X to Y')"
-    }
-  ],
-  "analysis_notes": ["note1", "note2"]
-}
+Return JSON with:
+- has_hallucinations: boolean
+- accuracy_score: 0-100
+- confidence: "high"/"medium"/"low"
+- summary: Brief summary (if no issues: "No significant hallucinations detected. The AI response is accurate.")
+- hallucinations: Array of issues (EMPTY if none found)
+- analysis_notes: Array of notes
 
 IMPORTANT:
-- Return an EMPTY hallucinations array [] if no significant issues are found
+- Return EMPTY hallucinations array [] if no significant issues
 - Only include hallucinations that would actually mislead a customer
-- Ignore minor wording differences, approximations, or reasonable inferences
-- A good AI response with no issues should have: accuracy_score >= 90, has_hallucinations: false
+- A good AI response should have: accuracy_score >= 90, has_hallucinations: false`;
 
-SEVERITY GUIDE (only flag if clearly wrong):
-- critical: Core business info wrong (pricing, main product category)
-- major: Important feature or service misrepresented
-- minor: Small detail inaccurate`;
+  // Schema for structured output
+  const hallucinationSchema = {
+    type: "json_schema",
+    name: "hallucination_detection",
+    strict: true,
+    schema: {
+      type: "object",
+      additionalProperties: false,
+      required: ["has_hallucinations", "accuracy_score", "confidence", "summary", "hallucinations", "analysis_notes"],
+      properties: {
+        has_hallucinations: { type: "boolean" },
+        accuracy_score: { type: "number", minimum: 0, maximum: 100 },
+        confidence: { type: "string", enum: ["high", "medium", "low"] },
+        summary: { type: "string", maxLength: 500 },
+        hallucinations: {
+          type: "array",
+          maxItems: 10,
+          items: {
+            type: "object",
+            additionalProperties: false,
+            // OpenAI schema validator requires `required` to include every key in `properties` when `strict: true`.
+            // We still keep these fields effectively optional by allowing null.
+            required: ["type", "severity", "claim", "reality", "affected_element", "specific_fix"],
+            properties: {
+              type: { type: "string", enum: ["positive", "negative", "misattribution", "outdated"] },
+              severity: { type: "string", enum: ["critical", "major", "minor"] },
+              claim: { type: "string", maxLength: 500 },
+              reality: { type: "string", maxLength: 500 },
+              // Optional fields: allow nulls (some model responses emit null for optionals)
+              affected_element: { type: ["string", "null"], maxLength: 100 },
+              specific_fix: { type: ["string", "null"], maxLength: 500 },
+            },
+          },
+        },
+        analysis_notes: {
+          type: "array",
+          maxItems: 10,
+          items: { type: "string", maxLength: 200 },
+        },
+      },
+    },
+  } as const;
 
   try {
-    const response = await openai.chat.completions.create({
+    const { response, usage } = await callOpenAIResponses({
+      client: openai,
+      provider: "openai",
       model: OPENAI_CHAT_MODEL,
-      messages: [
-        { role: "system", content: systemPrompt },
-        { role: "user", content: userPrompt },
-      ],
-      response_format: { type: "json_object" },
-      max_completion_tokens: 1500,
+      timeoutMs: LLM_TIMEOUTS_MS.hallucination,
+      request: {
+        model: OPENAI_CHAT_MODEL,
+        input: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: userPrompt },
+        ],
+        reasoning: { effort: ANALYSIS_REASONING_EFFORT },
+        text: { 
+          verbosity: "low",
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          format: hallucinationSchema as Record<string, unknown>,
+        },
+        max_output_tokens: 1500,
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      } as Record<string, unknown>,
     });
 
-    const content = response.choices[0]?.message?.content;
-    if (!content) throw new Error("Empty response from hallucination detection");
+    const content = extractOpenAIResponsesText(response);
+    if (!content) {
+      console.warn("[Hallucination] Empty response from OpenAI, returning safe default");
+      return {
+        has_hallucinations: false,
+        hallucinations: [],
+        accuracy_score: 75,
+        confidence: "low" as const,
+        summary: "Hallucination detection could not complete - no response from analysis model.",
+        analysis_notes: [...analysisNotes, "Analysis skipped due to empty model response"],
+      };
+    }
 
-    const result = JSON.parse(content);
+    let resultRaw;
+    try {
+      resultRaw = JSON.parse(content);
+    } catch (parseError) {
+      console.warn("[Hallucination] JSON parse error, attempting recovery:", parseError);
+      // Try to extract valid JSON
+      const jsonStart = content.indexOf("{");
+      const jsonEnd = content.lastIndexOf("}");
+      if (jsonStart !== -1 && jsonEnd !== -1 && jsonEnd > jsonStart) {
+        try {
+          const cleanedContent = content.slice(jsonStart, jsonEnd + 1)
+            .replace(/,\s*}/g, "}")
+            .replace(/,\s*]/g, "]")
+            .replace(/[\x00-\x1F\x7F]/g, " ");
+          resultRaw = JSON.parse(cleanedContent);
+          console.log("[Hallucination] Successfully recovered JSON");
+        } catch {
+          console.warn("[Hallucination] JSON recovery failed, returning safe default");
+          return {
+            has_hallucinations: false,
+            hallucinations: [],
+            accuracy_score: 75,
+            confidence: "low" as const,
+            summary: "Hallucination detection could not parse response.",
+            analysis_notes: [...analysisNotes, "Analysis failed due to malformed response"],
+          };
+        }
+      } else {
+        console.warn("[Hallucination] No valid JSON found, returning safe default");
+        return {
+          has_hallucinations: false,
+          hallucinations: [],
+          accuracy_score: 75,
+          confidence: "low" as const,
+          summary: "Hallucination detection could not parse response.",
+          analysis_notes: [...analysisNotes, "Analysis failed due to invalid response format"],
+        };
+      }
+    }
+    const result = HallucinationDetectionSchema.parse(resultRaw);
 
     // Transform hallucinations to include enhanced recommendations
     const hallucinations: DetectedHallucination[] = (result.hallucinations || []).map(
@@ -302,6 +505,12 @@ SEVERITY GUIDE (only flag if clearly wrong):
       confidence: result.confidence || "medium",
       summary: result.summary || defaultSummary,
       analysis_notes: [...analysisNotes, ...(result.analysis_notes || [])],
+      ground_truth_freshness: {
+        is_stale: freshnessCheck.isStale,
+        days_since_crawl: freshnessCheck.daysSinceCrawl,
+        recommendation: freshnessCheck.recommendation,
+      },
+      llm_usage: usage,
     };
   } catch (error) {
     console.error("[Hallucination] Detection failed:", error);
@@ -312,6 +521,11 @@ SEVERITY GUIDE (only flag if clearly wrong):
       confidence: "low",
       summary: "Hallucination analysis could not be completed.",
       analysis_notes: ["Hallucination analysis could not be completed"],
+      ground_truth_freshness: {
+        is_stale: freshnessCheck.isStale,
+        days_since_crawl: freshnessCheck.daysSinceCrawl,
+        recommendation: freshnessCheck.recommendation,
+      },
     };
   }
 }
@@ -531,5 +745,3 @@ export function quickHallucinationCheck(
 
   return { likely: false };
 }
-
-

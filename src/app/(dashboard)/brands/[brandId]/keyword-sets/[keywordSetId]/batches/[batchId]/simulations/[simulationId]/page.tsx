@@ -29,7 +29,23 @@ import { VisibilityGauge } from "@/components/ui/visibility-gauge";
 import { HallucinationWatchdogSection } from "@/components/brands/hallucination-watchdog-section";
 import { SentimentAnalysisCard } from "@/components/brands/sentiment-analysis-card";
 import { CitationAuthorityPanel } from "@/components/brands/citation-authority-panel";
-import { SupportedEngine, SelectionSignals, ActionItem, SupportedRegion, getRegionInfo, SentimentAnalysis, CitationAuthority, GroundingMetadata } from "@/types";
+import { HighlightedHtml } from "@/components/ui/highlighted-html";
+import { 
+  SupportedEngine, 
+  SelectionSignals, 
+  ActionItem, 
+  SupportedRegion, 
+  getRegionInfo, 
+  SentimentAnalysis, 
+  CitationAuthority, 
+  GroundingMetadata,
+  EnsembleSimulationData,
+  EnsembleVarianceMetrics,
+  PRESENCE_LEVEL_LABELS,
+  PRESENCE_LEVEL_DESCRIPTIONS,
+  PRESENCE_LEVEL_COLORS,
+  BrandPresenceLevel,
+} from "@/types";
 import { SimulationNavBar } from "./simulation-nav-bar";
 
 interface SimulationPageProps {
@@ -88,9 +104,21 @@ export default async function SimulationPage({ params }: SimulationPageProps) {
   
   // Extract new enhanced data
   const sentimentAnalysis = (simulation.sentiment_analysis || signals?.sentiment_analysis) as SentimentAnalysis | null;
-  const netSentimentScore = simulation.net_sentiment_score as number | null;
+  const rawNetSentimentScore = simulation.net_sentiment_score as number | null;
+  // Convert legacy -1 to +1 format to 0-100 scale if needed
+  const netSentimentScore = rawNetSentimentScore !== null
+    ? (rawNetSentimentScore >= -1 && rawNetSentimentScore <= 1
+        ? Math.round(((rawNetSentimentScore + 1) / 2) * 100)
+        : Math.round(rawNetSentimentScore))
+    : null;
   const citationAuthorities = (simulation.citation_authorities || signals?.citation_authorities) as CitationAuthority[] | null;
   const groundingMetadata = (simulation.grounding_metadata || signals?.grounding_metadata) as GroundingMetadata | null;
+  
+  // Extract ensemble and statistical data
+  const ensembleData = signals?.ensemble_data as EnsembleSimulationData | null;
+  const varianceMetrics = ensembleData?.variance_metrics as EnsembleVarianceMetrics | undefined;
+  const presenceLevel = (signals?.presence_level || "likely_absent") as BrandPresenceLevel;
+  const visibilityFrequency = signals?.visibility_frequency as number | undefined;
 
   // Calculate overall AEO score
   const gapAnalysis = signals?.gap_analysis;
@@ -230,30 +258,42 @@ export default async function SimulationPage({ params }: SimulationPageProps) {
           <VisibilityGauge value={overallScore} size="lg" label="AEO Score" />
         </div>
 
-        {/* Net Sentiment Score - NEW */}
+        {/* Net Sentiment Score - Shows "No brand mention" when brand not visible */}
         <div className="rounded-2xl border border-border bg-gradient-to-br from-card via-card to-muted/20 p-6">
           <p className="text-sm text-muted-foreground mb-3">Net Sentiment Score</p>
-          <div className="flex items-center gap-3">
-            <div className={`w-12 h-12 rounded-xl flex items-center justify-center ${
-              (netSentimentScore ?? 50) >= 60 ? 'bg-green-500/20' :
-              (netSentimentScore ?? 50) <= 40 ? 'bg-red-500/20' : 'bg-yellow-500/20'
-            }`}>
-              {(netSentimentScore ?? 50) >= 60 && <CheckCircle2 className="w-6 h-6 text-green-500" />}
-              {(netSentimentScore ?? 50) > 40 && (netSentimentScore ?? 50) < 60 && <AlertCircle className="w-6 h-6 text-yellow-500" />}
-              {(netSentimentScore ?? 50) <= 40 && <AlertCircle className="w-6 h-6 text-red-500" />}
-            </div>
-            <div>
-              <span className={`text-2xl font-bold ${
-                (netSentimentScore ?? 50) >= 60 ? 'text-green-500' :
-                (netSentimentScore ?? 50) <= 40 ? 'text-red-500' : 'text-yellow-500'
+          {simulation.is_visible ? (
+            <div className="flex items-center gap-3">
+              <div className={`w-12 h-12 rounded-xl flex items-center justify-center ${
+                (netSentimentScore ?? 50) >= 60 ? 'bg-green-500/20' :
+                (netSentimentScore ?? 50) <= 40 ? 'bg-red-500/20' : 'bg-yellow-500/20'
               }`}>
-                {netSentimentScore ?? "—"}
-              </span>
-              <p className="text-sm text-muted-foreground capitalize">
-                {signals?.sentiment || "Unknown"} tone
-              </p>
+                {(netSentimentScore ?? 50) >= 60 && <CheckCircle2 className="w-6 h-6 text-green-500" />}
+                {(netSentimentScore ?? 50) > 40 && (netSentimentScore ?? 50) < 60 && <AlertCircle className="w-6 h-6 text-yellow-500" />}
+                {(netSentimentScore ?? 50) <= 40 && <AlertCircle className="w-6 h-6 text-red-500" />}
+              </div>
+              <div>
+                <span className={`text-2xl font-bold ${
+                  (netSentimentScore ?? 50) >= 60 ? 'text-green-500' :
+                  (netSentimentScore ?? 50) <= 40 ? 'text-red-500' : 'text-yellow-500'
+                }`}>
+                  {netSentimentScore ?? "—"}
+                </span>
+                <p className="text-sm text-muted-foreground capitalize">
+                  {signals?.sentiment || "Unknown"} tone
+                </p>
+              </div>
             </div>
-          </div>
+          ) : (
+            <div className="flex items-center gap-3">
+              <div className="w-12 h-12 rounded-xl flex items-center justify-center bg-muted">
+                <MessageSquare className="w-6 h-6 text-muted-foreground" />
+              </div>
+              <div>
+                <span className="text-2xl font-bold text-muted-foreground">—</span>
+                <p className="text-sm text-muted-foreground">No brand mention</p>
+              </div>
+            </div>
+          )}
         </div>
       </div>
 
@@ -290,6 +330,126 @@ export default async function SimulationPage({ params }: SimulationPageProps) {
         </div>
       )}
 
+      {/* Ensemble Statistics & Statistical Significance - Shows when ensemble was used */}
+      {ensembleData && ensembleData.enabled && (
+        <div className="rounded-2xl border border-border bg-card overflow-hidden">
+          <div className="p-4 border-b border-border bg-muted/30">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-primary/20 flex items-center justify-center">
+                <BarChart3 className="w-5 h-5 text-primary" />
+              </div>
+              <div>
+                <h2 className="font-semibold">Ensemble Analysis</h2>
+                <p className="text-sm text-muted-foreground">
+                  Based on {ensembleData.successful_runs} of {ensembleData.run_count} simulations
+                </p>
+              </div>
+            </div>
+          </div>
+          
+          <div className="p-4 space-y-4">
+            {/* Presence Level */}
+            <div className={`p-4 rounded-xl border ${PRESENCE_LEVEL_COLORS[presenceLevel]}`}>
+              <div className="flex items-center justify-between mb-2">
+                <span className="font-medium">{PRESENCE_LEVEL_LABELS[presenceLevel]}</span>
+                {typeof visibilityFrequency === 'number' && (
+                  <span className="text-lg font-bold">
+                    {Math.round(visibilityFrequency * 100)}%
+                  </span>
+                )}
+              </div>
+              <p className="text-sm opacity-80">
+                {PRESENCE_LEVEL_DESCRIPTIONS[presenceLevel]}
+              </p>
+            </div>
+
+            {/* Statistical Metrics - Only shown when variance metrics are available */}
+            {varianceMetrics && (
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                {/* Confidence Interval */}
+                {varianceMetrics.confidence_interval && (
+                  <div className="p-3 rounded-xl bg-muted/30">
+                    <p className="text-xs text-muted-foreground mb-1">95% Confidence Interval</p>
+                    <p className="font-semibold">
+                      {Math.round(varianceMetrics.confidence_interval.lower_bound * 100)}% - {Math.round(varianceMetrics.confidence_interval.upper_bound * 100)}%
+                    </p>
+                  </div>
+                )}
+                
+                {/* Statistical Significance */}
+                <div className="p-3 rounded-xl bg-muted/30">
+                  <p className="text-xs text-muted-foreground mb-1">Statistical Significance</p>
+                  <p className={`font-semibold ${varianceMetrics.statistical_significance ? 'text-green-500' : 'text-yellow-500'}`}>
+                    {varianceMetrics.statistical_significance ? 'Yes ✓' : 'Not Significant'}
+                  </p>
+                </div>
+                
+                {/* P-Value */}
+                {typeof varianceMetrics.p_value === 'number' && (
+                  <div className="p-3 rounded-xl bg-muted/30">
+                    <p className="text-xs text-muted-foreground mb-1">P-Value</p>
+                    <p className="font-semibold">
+                      {varianceMetrics.p_value < 0.001 ? '< 0.001' : varianceMetrics.p_value.toFixed(3)}
+                    </p>
+                  </div>
+                )}
+                
+                {/* Standard Error */}
+                {typeof varianceMetrics.standard_error === 'number' && (
+                  <div className="p-3 rounded-xl bg-muted/30">
+                    <p className="text-xs text-muted-foreground mb-1">Standard Error</p>
+                    <p className="font-semibold">±{(varianceMetrics.standard_error * 100).toFixed(1)}%</p>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Brand Variance */}
+            {typeof ensembleData.brand_variance === 'number' && ensembleData.brand_variance > 0 && (
+              <div className="p-3 rounded-xl bg-muted/30">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-sm font-medium">Brand Detection Variance</span>
+                  <span className={`text-sm font-semibold ${
+                    ensembleData.brand_variance < 0.2 ? 'text-green-500' :
+                    ensembleData.brand_variance < 0.4 ? 'text-yellow-500' : 'text-red-500'
+                  }`}>
+                    {Math.round(ensembleData.brand_variance * 100)}%
+                  </span>
+                </div>
+                <div className="h-2 rounded-full bg-muted overflow-hidden">
+                  <div 
+                    className={`h-full rounded-full ${
+                      ensembleData.brand_variance < 0.2 ? 'bg-green-500' :
+                      ensembleData.brand_variance < 0.4 ? 'bg-yellow-500' : 'bg-red-500'
+                    }`}
+                    style={{ width: `${Math.min(ensembleData.brand_variance * 100, 100)}%` }}
+                  />
+                </div>
+                <p className="text-xs text-muted-foreground mt-1">
+                  {ensembleData.brand_variance < 0.2 ? 'Low variance - results are consistent across runs' :
+                   ensembleData.brand_variance < 0.4 ? 'Moderate variance - some inconsistency in results' :
+                   'High variance - results vary significantly between runs'}
+                </p>
+              </div>
+            )}
+
+            {/* Notes/Warnings */}
+            {ensembleData.notes && ensembleData.notes.length > 0 && (
+              <div className="p-3 rounded-xl bg-yellow-500/10 border border-yellow-500/20">
+                <div className="flex items-start gap-2">
+                  <AlertCircle className="w-4 h-4 text-yellow-500 mt-0.5 shrink-0" />
+                  <div className="text-sm text-yellow-600 dark:text-yellow-400">
+                    {ensembleData.notes.map((note, i) => (
+                      <p key={i}>{note}</p>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Hallucination Watchdog Section - PRO FEATURE */}
       <HallucinationWatchdogSection 
         data={hallucinationWatchdog} 
@@ -318,10 +478,26 @@ export default async function SimulationPage({ params }: SimulationPageProps) {
           className="p-4 max-h-[400px] overflow-y-auto bg-gradient-to-b from-transparent to-muted/10"
           dir={isArabic ? "rtl" : "ltr"}
         >
-          <div 
-            className="prose prose-sm dark:prose-invert max-w-none text-sm leading-relaxed prose-p:my-2 prose-p:text-foreground prose-strong:font-semibold prose-strong:text-foreground prose-em:text-foreground/90 prose-code:text-xs prose-code:font-mono prose-code:bg-muted prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-ul:my-2 prose-ol:my-2 prose-li:my-1 prose-a:text-primary prose-a:underline hover:prose-a:text-primary/80 prose-h3:text-lg prose-h3:font-semibold prose-h3:mt-4 prose-h3:mb-2 prose-h4:text-base prose-h4:font-semibold prose-h4:mt-3 prose-h4:mb-1 prose-h5:text-sm prose-h5:font-semibold prose-h6:text-sm prose-h6:font-semibold"
-            dangerouslySetInnerHTML={{ __html: simulation.ai_response_html || "<p class='text-muted-foreground'>No response recorded</p>" }}
-          />
+          {(() => {
+            const brandDomain = (brand.domain as string) || "";
+            const brandCore = brandDomain.replace(/^www\./, "").split(".")[0];
+            // Always provide brand terms; HighlightedHtml will only mark matches if present.
+            const terms = [
+              brand.name as string,
+              brandDomain,
+              brandCore,
+              ...(((brand.brand_aliases as string[]) || []).slice(0, 10)),
+              ...((((signals as unknown as { brand_mentions?: string[] } | null)?.brand_mentions) || []).slice(0, 10)),
+            ];
+
+            return (
+              <HighlightedHtml
+                className="prose prose-sm dark:prose-invert max-w-none text-sm leading-relaxed prose-p:my-2 prose-p:text-foreground prose-strong:font-semibold prose-strong:text-foreground prose-em:text-foreground/90 prose-code:text-xs prose-code:font-mono prose-code:bg-muted prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-ul:my-2 prose-ol:my-2 prose-li:my-1 prose-a:text-primary prose-a:underline hover:prose-a:text-primary/80 prose-h3:text-lg prose-h3:font-semibold prose-h3:mt-4 prose-h3:mb-2 prose-h4:text-base prose-h4:font-semibold prose-h4:mt-3 prose-h4:mb-1 prose-h5:text-sm prose-h5:font-semibold prose-h6:text-sm prose-h6:font-semibold"
+                html={simulation.ai_response_html || "<p class='text-muted-foreground'>No response recorded</p>"}
+                terms={terms}
+              />
+            );
+          })()}
         </div>
       </div>
 
@@ -503,14 +679,12 @@ export default async function SimulationPage({ params }: SimulationPageProps) {
         </div>
       )}
 
-      {/* Enhanced Sentiment Analysis Card - NEW */}
-      {simulation.is_visible && (
-        <SentimentAnalysisCard
-          data={sentimentAnalysis}
-          simpleSentiment={signals?.sentiment}
-          brandMentioned={simulation.is_visible}
-        />
-      )}
+      {/* Enhanced Sentiment Analysis Card */}
+      <SentimentAnalysisCard
+        data={sentimentAnalysis}
+        simpleSentiment={signals?.sentiment}
+        brandMentioned={signals?.is_visible ?? simulation.is_visible}
+      />
     </div>
   );
 }

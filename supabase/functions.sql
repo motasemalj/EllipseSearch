@@ -41,16 +41,10 @@ BEGIN
       updated_at = NOW()
   WHERE id = batch_id
   RETURNING completed_simulations, total_simulations INTO current_completed, total;
-  
-  -- Auto-complete batch if all simulations are done
-  -- Support both 'processing' and 'awaiting_rpa' statuses for RPA mode
-  IF current_completed >= total THEN
-    UPDATE analysis_batches
-    SET status = 'completed',
-        completed_at = NOW(),
-        updated_at = NOW()
-    WHERE id = batch_id AND status IN ('processing', 'awaiting_rpa');
-  END IF;
+  -- IMPORTANT:
+  -- Do NOT auto-complete the batch here. Simulations finishing != enrichment finished.
+  -- Batch completion is handled by the `finalize-analysis-batch` Trigger task, which waits
+  -- for enrichment (selection signals / AEO / sentiment / watchdog) and any active crawl to complete.
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 

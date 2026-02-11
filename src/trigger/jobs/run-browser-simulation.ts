@@ -21,6 +21,7 @@ import {
   shutdownBrowserPool,
   type BrowserSimulationMode,
 } from "@/lib/browser";
+import { sanitizeAiResponseForStorage } from "@/lib/security/sanitize-ai-html";
 import type {
   SupportedEngine,
   SupportedLanguage,
@@ -182,6 +183,11 @@ export const runBrowserSimulationTask = task({
       const hasKnowledgePanel = !!browserData?.knowledge_panel;
 
       // 6. Store results in simulation record
+      const normalized = sanitizeAiResponseForStorage({
+        html: result.answer_html || "",
+        text: result.answer_html || "",
+      });
+
       const { error: updateError } = await supabase
         .from("simulations")
         .upsert({
@@ -192,7 +198,7 @@ export const runBrowserSimulationTask = task({
           language,
           region,
           prompt_text: prompt.text,
-          ai_response_html: result.answer_html,
+          ai_response_html: normalized.safe_html,
           search_context: result.search_context || null,
           is_visible: isVisible,
           status: "completed",

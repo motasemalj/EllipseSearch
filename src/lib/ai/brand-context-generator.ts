@@ -6,6 +6,9 @@
 
 import OpenAI from "openai";
 import { OPENAI_CHAT_MODEL } from "@/lib/ai/openai-config";
+import { UNTRUSTED_CONTENT_POLICY } from "@/lib/ai/prompt-policies";
+import { callOpenAIChat } from "@/lib/ai/llm-runtime";
+import { LLM_TIMEOUTS_MS } from "@/lib/ai/openai-timeouts";
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
@@ -56,6 +59,7 @@ IMPORTANT: Your response must be valid JSON matching this schema:
   "competitors": ["Competitor 1", "Competitor 2"],
   "unique_selling_points": ["USP 1", "USP 2"]
 }`;
+  const hardenedSystemPrompt = `${UNTRUSTED_CONTENT_POLICY}\n\n${systemPrompt}`;
 
   const userPrompt = `Analyze this brand and generate context:
 
@@ -66,13 +70,19 @@ ${websiteContent ? `\nWebsite Content:\n${websiteContent.slice(0, 3000)}` : ''}
 Generate the brand context JSON.`;
 
   try {
-    const response = await openai.chat.completions.create({
+    const { response } = await callOpenAIChat({
+      client: openai,
+      provider: "openai",
+      model: OPENAI_CHAT_MODEL,
+      timeoutMs: LLM_TIMEOUTS_MS.groundTruthExtraction,
+      request: {
       model: OPENAI_CHAT_MODEL,
       messages: [
-        { role: "system", content: systemPrompt },
+        { role: "system", content: hardenedSystemPrompt },
         { role: "user", content: userPrompt },
       ],
       response_format: { type: "json_object" },
+      },
     });
 
     const content = response.choices[0]?.message?.content;

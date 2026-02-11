@@ -2,20 +2,17 @@ import { redirect } from "next/navigation";
 import { getCurrentUser, getUserProfile, getCachedBrands, getCachedSimulations } from "@/lib/cache";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
-import { Plus } from "lucide-react";
+import { Plus, Building2, Activity, BarChart3 } from "lucide-react";
 import { Brand, SupportedEngine } from "@/types";
 import { BrandsFilters } from "./brands-filters";
 
-// Route segment config for caching
 export const revalidate = 60;
 
 async function getBrandsData(organizationId: string) {
-  // Fetch brands and simulations in parallel
   const brands = await getCachedBrands(organizationId);
   const brandIds = brands.map(b => b.id);
   const simulations = await getCachedSimulations(brandIds);
 
-  // Calculate visibility per brand per engine
   const brandVisibility: Record<string, { 
     overall: number; 
     byEngine: Partial<Record<SupportedEngine, { visible: number; total: number }>>; 
@@ -41,28 +38,34 @@ async function getBrandsData(organizationId: string) {
     }
   });
 
-  return { brands, brandVisibility };
+  // Calculate summary stats
+  const totalBrands = brands.length;
+  const totalSimulations = simulations.length;
+  const totalVisible = simulations.filter(s => s.is_visible).length;
+  const avgVisibility = totalSimulations > 0 
+    ? Math.round((totalVisible / totalSimulations) * 100) 
+    : 0;
+
+  return { brands, brandVisibility, stats: { totalBrands, totalSimulations, avgVisibility } };
 }
 
 export default async function BrandsPage() {
-  // Use cached user and profile - deduplicated with layout
   const user = await getCurrentUser();
   if (!user) redirect("/login");
 
   const profile = await getUserProfile(user.id);
   if (!profile?.organization_id) redirect("/login");
 
-  const { brands, brandVisibility } = await getBrandsData(profile.organization_id);
+  const { brands, brandVisibility, stats } = await getBrandsData(profile.organization_id);
 
-  // Prepare brands data with visibility
   const brandsWithVisibility = brands.map((brand) => {
     const vis = brandVisibility[brand.id];
     const visibilityData = vis ? {
       overall: vis.count > 0 ? Math.round((vis.overall / vis.count) * 100) : 0,
       byEngine: Object.fromEntries(
-        Object.entries(vis.byEngine).map(([eng, stats]) => [
+        Object.entries(vis.byEngine).map(([eng, stat]) => [
           eng,
-          stats.total > 0 ? Math.round((stats.visible / stats.total) * 100) : 0
+          stat.total > 0 ? Math.round((stat.visible / stat.total) * 100) : 0
         ])
       ) as Partial<Record<SupportedEngine, number>>,
     } : undefined;
@@ -75,13 +78,13 @@ export default async function BrandsPage() {
   });
 
   return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+    <div className="space-y-6 animate-fade-in">
+      {/* Page Header */}
+      <div className="page-header">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight">Brands</h1>
-          <p className="text-muted-foreground mt-1">
-            Manage and monitor your client brands
+          <h1 className="page-title">Brands</h1>
+          <p className="page-description">
+            Manage and monitor AI visibility for your brands
           </p>
         </div>
         <Link href="/brands/new" prefetch={true}>
@@ -92,7 +95,44 @@ export default async function BrandsPage() {
         </Link>
       </div>
 
-      {/* Brands List with Filters */}
+      {/* Summary Stats */}
+      <div className="grid grid-cols-3 gap-4">
+        <div className="metric-card">
+          <div className="flex items-center gap-3">
+            <div className="p-2 rounded-lg bg-primary/10">
+              <Building2 className="w-4 h-4 text-primary" />
+            </div>
+            <div>
+              <p className="data-label">Total Brands</p>
+              <p className="text-2xl font-bold mt-0.5">{stats.totalBrands}</p>
+            </div>
+          </div>
+        </div>
+        <div className="metric-card">
+          <div className="flex items-center gap-3">
+            <div className="p-2 rounded-lg bg-info/10">
+              <Activity className="w-4 h-4 text-info" />
+            </div>
+            <div>
+              <p className="data-label">Total Analyses</p>
+              <p className="text-2xl font-bold mt-0.5">{stats.totalSimulations}</p>
+            </div>
+          </div>
+        </div>
+        <div className="metric-card">
+          <div className="flex items-center gap-3">
+            <div className="p-2 rounded-lg bg-success/10">
+              <BarChart3 className="w-4 h-4 text-success" />
+            </div>
+            <div>
+              <p className="data-label">Avg Visibility</p>
+              <p className="text-2xl font-bold mt-0.5 text-success">{stats.avgVisibility}%</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Brands List */}
       {brands.length === 0 ? (
         <EmptyState />
       ) : (
@@ -104,28 +144,22 @@ export default async function BrandsPage() {
 
 function EmptyState() {
   return (
-    <div className="rounded-2xl border-2 border-dashed border-border p-12 text-center">
-      <div className="mx-auto w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center mb-4">
-        <Building2Icon className="w-8 h-8 text-primary" />
+    <div className="enterprise-card">
+      <div className="empty-state py-16">
+        <div className="w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center mx-auto mb-4">
+          <Building2 className="w-8 h-8 text-primary" />
+        </div>
+        <h3 className="empty-state-title">No brands yet</h3>
+        <p className="empty-state-description">
+          Add your first brand to start monitoring AI visibility and get actionable insights.
+        </p>
+        <Link href="/brands/new" prefetch={true} className="mt-6 inline-block">
+          <Button size="lg" className="gap-2">
+            <Plus className="w-4 h-4" />
+            Add Your First Brand
+          </Button>
+        </Link>
       </div>
-      <h3 className="text-lg font-semibold mb-2">No brands yet</h3>
-      <p className="text-muted-foreground max-w-sm mx-auto mb-6">
-        Add your first brand to start monitoring AI visibility and get actionable insights.
-      </p>
-      <Link href="/brands/new" prefetch={true}>
-        <Button size="lg" className="gap-2">
-          <Plus className="w-4 h-4" />
-          Add Your First Brand
-        </Button>
-      </Link>
     </div>
-  );
-}
-
-function Building2Icon({ className }: { className?: string }) {
-  return (
-    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
-      <path d="M6 22V4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v18Z"/><path d="M6 12H4a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h2"/><path d="M18 9h2a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-2"/><path d="M10 6h4"/><path d="M10 10h4"/><path d="M10 14h4"/><path d="M10 18h4"/>
-    </svg>
   );
 }

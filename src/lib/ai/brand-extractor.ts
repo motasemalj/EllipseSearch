@@ -21,6 +21,9 @@ import type {
   SourceReference, 
   SupportedEngine,
 } from "@/types";
+import { UNTRUSTED_CONTENT_POLICY } from "@/lib/ai/prompt-policies";
+import { callOpenAIChat } from "@/lib/ai/llm-runtime";
+import { LLM_TIMEOUTS_MS } from "@/lib/ai/openai-timeouts";
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
@@ -331,6 +334,8 @@ RULES:
 - DO NOT include generic marketplaces (Amazon, eBay, etc.) as brands
 - DO NOT include review sites (G2, Trustpilot, etc.) as brands
 - DO include the actual companies/products being reviewed on those sites`;
+ 
+  const hardenedSystemPrompt = `${UNTRUSTED_CONTENT_POLICY}\n\n${systemPrompt}`;
 
   const userPrompt = `Extract all brands from this ${engine} AI response:
 
@@ -346,15 +351,21 @@ Extract:
 3. uncertainty_notes: Any ambiguities`;
 
   try {
-    const response = await openai.chat.completions.create({
+    const { response } = await callOpenAIChat({
+      client: openai,
+      provider: "openai",
+      model: OPENAI_CHAT_MODEL,
+      timeoutMs: LLM_TIMEOUTS_MS.brandExtraction,
+      request: {
       model: OPENAI_CHAT_MODEL,
       messages: [
-        { role: "system", content: systemPrompt },
+        { role: "system", content: hardenedSystemPrompt },
         { role: "user", content: userPrompt },
       ],
       response_format: {
         type: "json_schema",
         json_schema: BRAND_EXTRACTION_SCHEMA,
+      },
       },
     });
 

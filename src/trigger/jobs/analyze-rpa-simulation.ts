@@ -22,6 +22,7 @@ import {
   type GroundTruthData,
   type HallucinationResult,
 } from "@/lib/ai/hallucination-detector";
+import { analyzeSentiment } from "@/lib/ai/sentiment-analyzer";
 import { generateSchemaFix } from "@/lib/ai/schema-generator";
 import type { 
   SupportedEngine, 
@@ -31,6 +32,43 @@ import type {
   DetectedHallucination,
 } from "@/types";
 import type { CrawlAnalysis } from "@/lib/ai/crawl-analyzer";
+import { ENRICHMENT_PIPELINE_VERSION, VISIBILITY_CONTRACT_VERSION } from "@/lib/ai/versions";
+
+/**
+ * Strip HTML tags and decode entities to get plain text for sentiment analysis.
+ * This is important because sentiment analysis works better with clean text.
+ */
+function stripHtmlToPlainText(html: string): string {
+  if (!html) return "";
+  
+  return html
+    // Remove script and style content
+    .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, "")
+    .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, "")
+    // Replace block elements with newlines
+    .replace(/<\/(p|div|h[1-6]|li|br|tr)>/gi, "\n")
+    .replace(/<(br|hr)[^>]*\/?>/gi, "\n")
+    // Remove all remaining HTML tags
+    .replace(/<[^>]+>/g, " ")
+    // Decode common HTML entities
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;/gi, "'")
+    .replace(/&rsquo;/gi, "'")
+    .replace(/&lsquo;/gi, "'")
+    .replace(/&rdquo;/gi, '"')
+    .replace(/&ldquo;/gi, '"')
+    .replace(/&mdash;/gi, "—")
+    .replace(/&ndash;/gi, "–")
+    .replace(/&#\d+;/g, "") // Remove numeric entities
+    // Clean up whitespace
+    .replace(/\s+/g, " ")
+    .replace(/\n\s*\n/g, "\n")
+    .trim();
+}
 
 // Create Supabase client with service role
 function getSupabase() {
@@ -58,7 +96,10 @@ interface AnalyzeRpaSimulationInput {
 
 export const analyzeRpaSimulation = task({
   id: "analyze-rpa-simulation",
-  maxDuration: 90, // 1.5 minutes max (reduced from 2)
+  // IMPORTANT: RPA analysis can include multiple LLM calls (selection signals + hallucination + sentiment)
+  // and routinely exceeds 90s in real conditions. If this task times out, `enrichment_status` never flips
+  // to completed/failed and `finalize-analysis-batch` will keep the batch stuck "processing".
+  maxDuration: 240, // 4 minutes
   queue: rpaAnalysisQueue, // Use queue for concurrency control
   retry: {
     maxAttempts: 2,
@@ -79,83 +120,106 @@ export const analyzeRpaSimulation = task({
     
     console.log(`[RPA Analysis] Starting analysis for simulation ${simulation_id}`);
     
-    // 1. Fetch simulation data
-    const { data: simulation, error: simError } = await supabase
-      .from("simulations")
-      .select("*")
-      .eq("id", simulation_id)
-      .single();
-    
-    if (simError || !simulation) {
-      throw new Error(`Simulation not found: ${simulation_id}`);
-    }
-    
-    // 2. Fetch brand data
-    const { data: brand, error: brandError } = await supabase
-      .from("brands")
-      .select("*")
-      .eq("id", brand_id)
-      .single();
-    
-    if (brandError || !brand) {
-      throw new Error(`Brand not found: ${brand_id}`);
-    }
-    
-    const brandName = brand.name || "";
-    const brandDomain = brand.domain || "";
-    const brandAliases = brand.brand_aliases || [];
-    
-    // Build comprehensive aliases
-    const allAliases = [...brandAliases];
-    if (brandName) {
-      allAliases.push(brandName);
-      const simplified = brandName.replace(/properties|realty|real estate|group|holdings|development|developers|uae|dubai/gi, '').trim();
-      if (simplified.length > 2 && !allAliases.includes(simplified)) {
-        allAliases.push(simplified);
+    // NOTE: This task must be "never-fail" to avoid batches getting stuck in processing.
+    // Always set enrichment_status to completed/failed and update batch progress on exit paths.
+    try {
+      // 1. Fetch simulation data
+      const { data: simulation, error: simError } = await supabase
+        .from("simulations")
+        .select("*")
+        .eq("id", simulation_id)
+        .single();
+      
+      if (simError || !simulation) {
+        throw new Error(`Simulation not found: ${simulation_id}`);
       }
-    }
+      
+      // 2. Fetch brand data
+      const { data: brand, error: brandError } = await supabase
+        .from("brands")
+        .select("*")
+        .eq("id", brand_id)
+        .single();
+      
+      if (brandError || !brand) {
+        throw new Error(`Brand not found: ${brand_id}`);
+      }
     
-    // 3. Validate we have content to analyze
-    const responseHtml = simulation.ai_response_html || "";
-    const responseLength = responseHtml.length;
+      const brandName = brand.name || "";
+      const brandDomain = brand.domain || "";
+      const brandAliases = brand.brand_aliases || [];
+    
+      // Build comprehensive aliases
+      const allAliases = [...brandAliases];
+      if (brandName) {
+        allAliases.push(brandName);
+        const simplified = brandName.replace(/properties|realty|real estate|group|holdings|development|developers|uae|dubai/gi, '').trim();
+        if (simplified.length > 2 && !allAliases.includes(simplified)) {
+          allAliases.push(simplified);
+        }
+      }
+    
+      // 3. Validate we have content to analyze
+      const responseHtml = simulation.ai_response_html || "";
+      const responseLength = responseHtml.length;
     
     console.log(`[RPA Analysis] Response content: ${responseLength} chars`);
     
-    if (responseLength < 20) {
-      console.warn(`[RPA Analysis] Response too short (${responseLength} chars), skipping GPT analysis`);
-      
-      // Still mark as completed but flag the issue
-      await supabase
-        .from("simulations")
-        .update({
-          status: "completed",
-          selection_signals: {
-            ...simulation.selection_signals,
-            analysis_pending: false,
-            analysis_error: `Response too short for analysis (${responseLength} chars)`,
-            is_visible: simulation.is_visible || false,
-            sentiment: "neutral",
-            recommendation: "The AI response was too short for full analysis. This may indicate a browser automation issue. Please try running the analysis again.",
-          },
-        })
-        .eq("id", simulation_id);
-      
-      return {
-        simulation_id,
-        is_visible: simulation.is_visible || false,
-        sentiment: "neutral",
-        analyzed: false,
-        error: `Response too short (${responseLength} chars)`,
-      };
-    }
+      if (responseLength < 20) {
+        console.warn(`[RPA Analysis] Response too short (${responseLength} chars), skipping GPT analysis`);
+        
+        // Mark as failed enrichment so batches can finalize
+        await supabase
+          .from("simulations")
+          .update({
+            status: "completed",
+            selection_signals: {
+              ...simulation.selection_signals,
+              analysis_pending: false,
+              analysis_error: `Response too short for analysis (${responseLength} chars)`,
+              is_visible: simulation.is_visible || false,
+              sentiment: "neutral",
+              recommendation: "The AI response was too short for full analysis. This may indicate a browser automation issue. Please try running the analysis again.",
+              enrichment_pipeline_version: ENRICHMENT_PIPELINE_VERSION,
+              visibility_contract_version: VISIBILITY_CONTRACT_VERSION,
+            },
+            enrichment_status: "failed",
+            enrichment_error: `Response too short for analysis (${responseLength} chars)`,
+            enrichment_completed_at: new Date().toISOString(),
+            analysis_stage: "completed_with_error",
+          })
+          .eq("id", simulation_id);
+        
+        // Update batch progress + finalize (best-effort)
+        if (analysis_batch_id) {
+          try {
+            await supabase.rpc("increment_batch_completed", { batch_id: analysis_batch_id });
+          } catch {
+            // ignore
+          }
+          await tasks.trigger(
+            "finalize-analysis-batch",
+            { analysis_batch_id },
+            { debounce: { key: `finalize-${analysis_batch_id}`, delay: "10s", mode: "trailing" } }
+          );
+        }
+        
+        return {
+          simulation_id,
+          is_visible: simulation.is_visible || false,
+          sentiment: "neutral",
+          analyzed: false,
+          error: `Response too short (${responseLength} chars)`,
+        };
+      }
     
     // 3.5 Run GPT-based selection signal analysis
     console.log(`[RPA Analysis] Running GPT analysis for ${engine}...`);
     console.log(`[RPA Analysis] Content to analyze (first 500 chars): ${responseHtml.slice(0, 500)}`);
     console.log(`[RPA Analysis] Search context: ${simulation.search_context?.results?.length || 0} results`);
     
-    let selectionSignals;
-    try {
+      let selectionSignals;
+      try {
       selectionSignals = await analyzeSelectionSignals({
         answer_html: responseHtml,
         answer_text: responseHtml, // Also pass as text in case HTML parsing is needed
@@ -296,11 +360,12 @@ export const analyzeRpaSimulation = task({
         crawl_analysis?: CrawlAnalysis;
       } | null;
       
-      let crawlAnalysis = groundTruthSummary?.crawl_analysis;
+      const crawlAnalysis = groundTruthSummary?.crawl_analysis;
       
       if (!crawlAnalysis) {
-        console.log(`[RPA Analysis] No crawl data - triggering auto-crawl...`);
-        crawlAnalysis = await triggerAutoCrawlIfNeeded(supabase, brand_id, brand) ?? undefined;
+        // NOTE: Crawl is triggered ONCE by /api/analysis/run endpoint, NOT here
+        // This prevents multiple simulations from triggering duplicate crawls
+        console.log(`[RPA Analysis] No crawl data available - crawl may be in progress (triggered by API)`);
       }
       
       // Enhance with tiered recommendations
@@ -312,74 +377,141 @@ export const analyzeRpaSimulation = task({
         engine,
         crawlAnalysis,
       });
+
+      // 3.7 Sentiment Analysis - run for all RPA responses (not gated by visibility)
+      // Sentiment can be detected even when brand isn't explicitly mentioned
+      // IMPORTANT: Use plain text, not HTML - LLM analyzes sentiment better on clean text
+      let sentimentAnalysis: unknown = null;
+      let netSentimentScore: number | null = null;
+      try {
+        const responseHtmlForSentiment = simulation.ai_response_html || "";
+        const responseTextForSentiment = stripHtmlToPlainText(responseHtmlForSentiment);
+        
+        if (responseTextForSentiment.length > 50) {
+          console.log(`[RPA Analysis] Running sentiment analysis for ${engine} (${responseTextForSentiment.length} chars of plain text)...`);
+          const sentiment = await analyzeSentiment(responseTextForSentiment, brandName);
+          sentimentAnalysis = sentiment;
+          netSentimentScore = sentiment.net_sentiment_score;
+          console.log(`[RPA Analysis] Sentiment: polarity=${sentiment.polarity.toFixed(2)}, NSS=${netSentimentScore}`);
+        } else {
+          console.log(`[RPA Analysis] Skipping sentiment - response too short (${responseTextForSentiment.length} chars plain text from ${responseHtmlForSentiment.length} chars HTML)`);
+        }
+      } catch (sentimentError) {
+        console.warn(`[RPA Analysis] Sentiment analysis failed (non-fatal):`, sentimentError);
+        // Non-fatal: continue without sentiment
+      }
+
+      // Store sentiment in selection signals
+      (selectionSignals as unknown as Record<string, unknown>).sentiment_analysis = sentimentAnalysis;
+      (selectionSignals as unknown as Record<string, unknown>).net_sentiment_score = netSentimentScore;
       
-    } catch (analysisError) {
-      console.error("[RPA Analysis] GPT analysis failed:", analysisError);
-      // Update simulation to completed with error note - DON'T re-throw
-      // We want the simulation to be marked completed even if analysis fails
-      await supabase
+      } catch (analysisError) {
+        console.error("[RPA Analysis] GPT analysis failed:", analysisError);
+
+        // Mark as failed enrichment so batches can finalize (do NOT re-throw)
+        await supabase
+          .from("simulations")
+          .update({
+            status: "completed",
+            selection_signals: {
+              ...simulation.selection_signals,
+              analysis_pending: false,
+              analysis_error: String(analysisError),
+              is_visible: simulation.is_visible || false,
+              sentiment: "neutral",
+              recommendation: "Analysis could not be completed due to an error. Please try again.",
+              enrichment_pipeline_version: ENRICHMENT_PIPELINE_VERSION,
+              visibility_contract_version: VISIBILITY_CONTRACT_VERSION,
+            },
+            enrichment_status: "failed",
+            enrichment_error: String(analysisError),
+            enrichment_completed_at: new Date().toISOString(),
+            analysis_stage: "completed_with_error",
+          })
+          .eq("id", simulation_id);
+
+        // Update batch progress + finalize (best-effort)
+        if (analysis_batch_id) {
+          try {
+            await supabase.rpc("increment_batch_completed", { batch_id: analysis_batch_id });
+          } catch {
+            // ignore
+          }
+          await tasks.trigger(
+            "finalize-analysis-batch",
+            { analysis_batch_id },
+            { debounce: { key: `finalize-${analysis_batch_id}`, delay: "10s", mode: "trailing" } }
+          );
+        }
+        
+        return {
+          simulation_id,
+          is_visible: simulation.is_visible || false,
+          sentiment: "neutral",
+          analyzed: false,
+          error: String(analysisError),
+        };
+      }
+    
+      // 4. Merge with existing data (preserve RPA-specific fields)
+      const existingSignals = simulation.selection_signals || {};
+      const signalsRecord = selectionSignals as unknown as Record<string, unknown>;
+      const mergedSignals = {
+        ...selectionSignals,
+        // Preserve RPA metadata
+        source: existingSignals.source || "rpa",
+        rpa_run_id: existingSignals.rpa_run_id,
+        rpa_duration_seconds: existingSignals.rpa_duration_seconds,
+        rpa_citation_count: existingSignals.rpa_citation_count,
+        // Preserve citation authorities from RPA
+        citation_authorities: existingSignals.citation_authorities,
+        brand_mentions: existingSignals.brand_mentions,
+        brand_citations: existingSignals.brand_citations,
+        // Use best visibility signal
+        is_visible: selectionSignals.is_visible || simulation.is_visible,
+        // Include sentiment analysis results
+        sentiment_analysis: signalsRecord.sentiment_analysis || null,
+        net_sentiment_score: signalsRecord.net_sentiment_score ?? null,
+        // Mark analysis complete
+        analysis_pending: false,
+        enrichment_pipeline_version: ENRICHMENT_PIPELINE_VERSION,
+        visibility_contract_version: VISIBILITY_CONTRACT_VERSION,
+      };
+    
+    // 5. Update simulation with full analysis
+      const { error: updateError } = await supabase
         .from("simulations")
         .update({
+          is_visible: mergedSignals.is_visible,
+          sentiment: selectionSignals.sentiment,
+          selection_signals: mergedSignals,
           status: "completed",
-          selection_signals: {
-            ...simulation.selection_signals,
-            analysis_pending: false,
-            analysis_error: String(analysisError),
-            is_visible: simulation.is_visible || false,
-            sentiment: "neutral",
-            recommendation: "Analysis could not be completed due to an error. Please try again.",
-          },
+          // Best-effort enrichment lifecycle fields (used by finalize-analysis-batch)
+          enrichment_status: "completed",
+          enrichment_completed_at: new Date().toISOString(),
+          analysis_stage: "completed",
         })
         .eq("id", simulation_id);
       
-      // Return success with error flag instead of throwing
-      return {
-        simulation_id,
-        is_visible: simulation.is_visible || false,
-        sentiment: "neutral",
-        analyzed: false,
-        error: String(analysisError),
-      };
-    }
-    
-    // 4. Merge with existing data (preserve RPA-specific fields)
-    const existingSignals = simulation.selection_signals || {};
-    const mergedSignals = {
-      ...selectionSignals,
-      // Preserve RPA metadata
-      source: existingSignals.source || "rpa",
-      rpa_run_id: existingSignals.rpa_run_id,
-      rpa_duration_seconds: existingSignals.rpa_duration_seconds,
-      rpa_citation_count: existingSignals.rpa_citation_count,
-      // Preserve citation authorities from RPA
-      citation_authorities: existingSignals.citation_authorities,
-      brand_mentions: existingSignals.brand_mentions,
-      brand_citations: existingSignals.brand_citations,
-      // Use best visibility signal
-      is_visible: selectionSignals.is_visible || simulation.is_visible,
-      // Mark analysis complete
-      analysis_pending: false,
-    };
-    
-    // 5. Update simulation with full analysis
-    const { error: updateError } = await supabase
-      .from("simulations")
-      .update({
-        is_visible: mergedSignals.is_visible,
-        sentiment: selectionSignals.sentiment,
-        selection_signals: mergedSignals,
-        status: "completed",
-      })
-      .eq("id", simulation_id);
-    
-    if (updateError) {
-      throw new Error(`Failed to update simulation: ${updateError.message}`);
-    }
+      if (updateError) {
+        // Don't throw: mark as failed enrichment so the batch doesn't get stuck
+        console.error(`[RPA Analysis] Failed to update simulation ${simulation_id}: ${updateError.message}`);
+        await supabase
+          .from("simulations")
+          .update({
+            status: "completed",
+            enrichment_status: "failed",
+            enrichment_error: `Failed to update simulation: ${updateError.message}`,
+            enrichment_completed_at: new Date().toISOString(),
+            analysis_stage: "completed_with_error",
+          })
+          .eq("id", simulation_id);
+      }
     
     console.log(`[RPA Analysis] Updated simulation ${simulation_id} with full analysis`);
     
-    // 6. Update batch progress if applicable
-    if (analysis_batch_id) {
+      // 6. Update batch progress if applicable
+      if (analysis_batch_id) {
       try {
         // Use the correct function name: increment_batch_completed
         await supabase.rpc("increment_batch_completed", {
@@ -414,33 +546,75 @@ export const analyzeRpaSimulation = task({
                 updated_at: new Date().toISOString(),
               })
               .eq("id", analysis_batch_id);
-            
-            // If all simulations are done, mark batch as completed
-            if (completedCount >= batch.total_simulations && batch.status !== "completed") {
-              await supabase
-                .from("analysis_batches")
-                .update({ 
-                  status: "completed",
-                  completed_at: new Date().toISOString(),
-                  updated_at: new Date().toISOString(),
-                })
-                .eq("id", analysis_batch_id);
-              
-              console.log(`[RPA Analysis] Batch ${analysis_batch_id} marked as completed (fallback)`);
-            }
           }
         } catch (fallbackError) {
           console.error("[RPA Analysis] Fallback batch update also failed:", fallbackError);
         }
       }
+
+        await tasks.trigger(
+          "finalize-analysis-batch",
+          { analysis_batch_id },
+          { debounce: { key: `finalize-${analysis_batch_id}`, delay: "10s", mode: "trailing" } }
+        );
+      }
+      
+      return {
+        simulation_id,
+        is_visible: mergedSignals.is_visible,
+        sentiment: selectionSignals.sentiment,
+        analyzed: true,
+      };
+    } catch (fatalError) {
+      // Absolute safety net: do not let this task fail and strand the batch.
+      const msg = fatalError instanceof Error ? fatalError.message : String(fatalError);
+      console.error(`[RPA Analysis] Fatal error (safety net): ${msg}`);
+      try {
+        await supabase
+          .from("simulations")
+          .update({
+            status: "completed",
+            selection_signals: {
+              analysis_pending: false,
+              analysis_error: msg,
+              enrichment_pipeline_version: ENRICHMENT_PIPELINE_VERSION,
+              visibility_contract_version: VISIBILITY_CONTRACT_VERSION,
+            },
+            enrichment_status: "failed",
+            enrichment_error: msg,
+            enrichment_completed_at: new Date().toISOString(),
+            analysis_stage: "completed_with_error",
+          })
+          .eq("id", simulation_id);
+      } catch {
+        // ignore
+      }
+
+      if (analysis_batch_id) {
+        try {
+          await supabase.rpc("increment_batch_completed", { batch_id: analysis_batch_id });
+        } catch {
+          // ignore
+        }
+        try {
+          await tasks.trigger(
+            "finalize-analysis-batch",
+            { analysis_batch_id },
+            { debounce: { key: `finalize-${analysis_batch_id}`, delay: "10s", mode: "trailing" } }
+          );
+        } catch {
+          // ignore
+        }
+      }
+
+      return {
+        simulation_id,
+        is_visible: false,
+        sentiment: "neutral",
+        analyzed: false,
+        error: msg,
+      };
     }
-    
-    return {
-      simulation_id,
-      is_visible: mergedSignals.is_visible,
-      sentiment: selectionSignals.sentiment,
-      analyzed: true,
-    };
   },
 });
 
@@ -451,6 +625,7 @@ export const analyzeRpaSimulation = task({
 /**
  * Trigger website crawl if no crawl data exists.
  */
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 async function triggerAutoCrawlIfNeeded(
   supabase: ReturnType<typeof getSupabase>,
   brandId: string,

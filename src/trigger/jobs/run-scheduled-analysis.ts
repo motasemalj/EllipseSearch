@@ -1,4 +1,4 @@
-import { schedules } from "@trigger.dev/sdk";
+import { schedules } from "@trigger.dev/sdk/v3";
 import { createClient } from "@supabase/supabase-js";
 import { tasks } from "@trigger.dev/sdk/v3";
 import type { SupportedEngine, SupportedLanguage, SupportedRegion, RunAnalysisInput } from "@/types";
@@ -18,7 +18,7 @@ interface ScheduledAnalysis {
   language: SupportedLanguage;
   region: SupportedRegion;
   enable_hallucination_watchdog: boolean;
-  frequency: 'daily' | 'weekly' | 'biweekly' | 'monthly';
+  frequency: 'daily' | 'weekly' | 'biweekly' | 'monthly' | '1x_daily' | '3x_daily' | '6x_daily';
   is_active: boolean;
   last_run_at: string | null;
   next_run_at: string;
@@ -27,8 +27,31 @@ interface ScheduledAnalysis {
 
 // Calculate next run time based on frequency
 function calculateNextRunTime(frequency: string, fromTime: Date = new Date()): Date {
-  const next = new Date(fromTime);
-  
+  const now = new Date(fromTime);
+
+  // For daily multi-run schedules, align to fixed UTC slots.
+  // 1x_daily: 08:00 UTC
+  // 3x_daily: 08:00, 14:00, 20:00 UTC
+  // 6x_daily: 00:00, 04:00, 08:00, 12:00, 16:00, 20:00 UTC
+  const slotHours =
+    frequency === "6x_daily" ? [0, 4, 8, 12, 16, 20] :
+    frequency === "3x_daily" ? [8, 14, 20] :
+    frequency === "1x_daily" ? [8] :
+    null;
+
+  if (slotHours) {
+    const next = new Date(now);
+    next.setUTCMinutes(0, 0, 0);
+    const currentHour = now.getUTCHours();
+    const nextHour = slotHours.find((h) => h > currentHour) ?? slotHours[0];
+    next.setUTCHours(nextHour, 0, 0, 0);
+    if (nextHour <= currentHour) {
+      next.setUTCDate(next.getUTCDate() + 1);
+    }
+    return next;
+  }
+
+  const next = new Date(now);
   switch (frequency) {
     case 'daily':
       next.setDate(next.getDate() + 1);
@@ -45,7 +68,6 @@ function calculateNextRunTime(frequency: string, fromTime: Date = new Date()): D
     default:
       next.setDate(next.getDate() + 1);
   }
-  
   return next;
 }
 
@@ -111,17 +133,42 @@ export const runScheduledAnalysesTask = schedules.task({
           continue;
         }
         
-        // Get prompt count to estimate credits needed
-        let promptCount = 0;
-        
+        // Get prompts (brand-level schedules run all active prompts for the brand)
+        let promptsToProcess: { id: string; text: string }[] = [];
+
         if (schedule.prompt_id) {
-          promptCount = 1;
-        } else if (schedule.prompt_set_id) {
-          const { count } = await supabase
+          const { data: prompt } = await supabase
             .from("prompts")
-            .select("*", { count: "exact", head: true })
+            .select("id, text")
+            .eq("id", schedule.prompt_id)
+            .single();
+          if (prompt) promptsToProcess = [prompt];
+        } else if (schedule.prompt_set_id) {
+          const { data: prompts } = await supabase
+            .from("prompts")
+            .select("id, text")
             .eq("prompt_set_id", schedule.prompt_set_id);
-          promptCount = count || 0;
+          promptsToProcess = prompts || [];
+        } else {
+          const { data: prompts } = await supabase
+            .from("prompts")
+            .select("id, text")
+            .eq("brand_id", schedule.brand_id)
+            .eq("is_active", true);
+          promptsToProcess = prompts || [];
+        }
+
+        const promptCount = promptsToProcess.length;
+        if (promptCount === 0) {
+          // Keep schedule active, but don't run empty analyses.
+          const nextRunAt = calculateNextRunTime(schedule.frequency, now);
+          await supabase
+            .from("scheduled_analyses")
+            .update({ next_run_at: nextRunAt.toISOString() })
+            .eq("id", schedule.id);
+          console.log(`[Scheduler] Skipping schedule ${schedule.id} - no active prompts (next: ${nextRunAt.toISOString()})`);
+          skipped++;
+          continue;
         }
         
         const totalSimulations = promptCount * schedule.engines.length;
@@ -176,24 +223,6 @@ export const runScheduledAnalysesTask = schedules.task({
           continue;
         }
         
-        // Get prompts
-        let promptsToProcess: { id: string; text: string }[] = [];
-        
-        if (schedule.prompt_id) {
-          const { data: prompt } = await supabase
-            .from("prompts")
-            .select("id, text")
-            .eq("id", schedule.prompt_id)
-            .single();
-          if (prompt) promptsToProcess = [prompt];
-        } else if (schedule.prompt_set_id) {
-          const { data: prompts } = await supabase
-            .from("prompts")
-            .select("id, text")
-            .eq("prompt_set_id", schedule.prompt_set_id);
-          promptsToProcess = prompts || [];
-        }
-        
         // Create RPA simulations if needed
         if (hasRpaWork && promptsToProcess.length > 0) {
           const rpaSimulations = promptsToProcess.flatMap(prompt =>
@@ -217,7 +246,11 @@ export const runScheduledAnalysesTask = schedules.task({
           const payload: RunAnalysisInput = {
             brand_id: schedule.brand_id,
             prompt_set_id: schedule.prompt_set_id || undefined,
-            prompt_ids: schedule.prompt_id ? [schedule.prompt_id] : undefined,
+            prompt_ids: schedule.prompt_id
+              ? [schedule.prompt_id]
+              : schedule.prompt_set_id
+                ? undefined
+                : promptsToProcess.map((p) => p.id),
             engines: apiEngines,
             language: schedule.language,
             region: schedule.region,

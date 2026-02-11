@@ -20,7 +20,7 @@ ENGINE_URLS = {
     "chatgpt": "https://chatgpt.com",
     "gemini": "https://gemini.google.com/app",
     "perplexity": "https://www.perplexity.ai",
-    "grok": "https://grok.x.ai",
+    "grok": "https://grok.com",
 }
 
 # ===========================================
@@ -179,66 +179,116 @@ ENGINE_SELECTORS = {
     "gemini": {
         "prompt_input": [
             "rich-textarea",
-            "[contenteditable='true']",
+            "rich-textarea [contenteditable='true']",
+            "[contenteditable='true'][role='textbox']",
+            "textarea[placeholder*='Enter a prompt']",
+            "textarea[aria-label*='prompt']",
             "textarea",
+            "input[type='text']",
         ],
         "submit_button": [
             "button[aria-label*='Send']",
+            "button[aria-label*='send']",
+            "button[data-testid='send-button']",
             "[class*='send-button']",
             "button[type='submit']",
+            "button:has(svg[class*='send'])",
+            "button[class*='submit']",
         ],
-        "response_container": ".model-response-text, [class*='response-container'], message-content",
-        "response_text": ".markdown-main-panel, [class*='markdown']",
-        "streaming_indicator": ".loading-state, [class*='loading'], [class*='pending']",
-        "sources_section": ".grounding-sources, [class*='grounding']",
-        "source_card": ".source-chip, [class*='source-chip']",
-        "citation_link": "a.source-link, [class*='source-link']",
-        "error_message": ".error-container, [class*='error']",
-        "loading_indicator": ".loading-indicator, [class*='loading']",
-        "new_chat_button": "[aria-label*='New chat'], [class*='new-conversation']",
+        # Response containers (Gemini UI uses a markdown panel with id "model-response-message-content...") 
+        "response_container": (
+            "[id^='model-response-message-content'], "
+            "div.markdown.markdown-main-panel, "
+            ".markdown-main-panel, "
+            ".model-response-text, "
+            "[class*='response-container'], "
+            "message-content, "
+            "[class*='model-response']"
+        ),
+        # Response text extraction (prefer markdown panel)
+        "response_text": "div.markdown.markdown-main-panel, .markdown-main-panel, [class*='markdown'], [class*='response-text']",
+        "streaming_indicator": ".loading-state, [class*='loading'], [class*='pending'], [class*='streaming']",
+        "sources_section": ".grounding-sources, [class*='grounding'], [class*='sources']",
+        "source_card": ".source-chip, [class*='source-chip'], [class*='citation-chip']",
+        "citation_link": "a.source-link, [class*='source-link'], a[href^='http']:not([href*='google.com'])",
+        "error_message": ".error-container, [class*='error'], [role='alert']",
+        "loading_indicator": ".loading-indicator, [class*='loading'], [class*='spinner']",
+        "new_chat_button": "[aria-label*='New chat'], [class*='new-conversation'], button[aria-label*='New']",
     },
     
     "perplexity": {
         "prompt_input": [
             "textarea[placeholder*='Ask']",
+            "textarea[placeholder*='ask']",
             "textarea[data-testid='search-input']",
+            "textarea[data-testid='perplexity-input']",
+            "textarea[aria-label*='Ask']",
+            "textarea[aria-label*='ask']",
+            "div[contenteditable='true'][role='textbox']",
             "textarea",
+            "input[type='text']",
         ],
         "submit_button": [
             "button[type='submit']",
             "button[aria-label*='Search']",
             "button[aria-label*='Submit']",
+            "button[data-testid='submit-button']",
+            "button:has(svg[class*='send'])",
+            "button:has(svg[class*='arrow'])",
+            "button[class*='submit']",
+            "button[class*='send']",
         ],
-        "response_container": "[class*='prose'], [class*='response-text']",
-        "response_text": "[class*='prose'] > div, [class*='markdown']",
-        "streaming_indicator": "[class*='animate-pulse'], [class*='typing']",
-        "sources_section": "[class*='sources-section']",
-        "source_card": "[class*='source-card'], [class*='source-item']",
-        "citation_link": "a[class*='citation']",
+        # Perplexity 2026 UI: responses use div.prose with dark:prose-invert
+        "response_container": "div.prose, div.prose.dark\\:prose-invert, [class*='prose'][class*='inline'], [class*='response-text'], [class*='answer']",
+        "response_text": "div.prose, p.my-2, h2, ul.list-disc, li, p",
+        "streaming_indicator": "[class*='animate-pulse'], [class*='typing'], [class*='streaming'], [class*='loading']",
+        "sources_section": "[class*='sources-section'], [class*='sources']",
+        "source_card": "[class*='source-card'], [class*='source-item'], [class*='citation-card'], span.citation",
+        "citation_link": "span.citation a[href^='http'], a[data-pplx-citation], a[href^='http']:not([href*='perplexity.ai'])",
         "error_message": "[class*='error'], [role='alert']",
-        "loading_indicator": "[class*='loading'], [class*='spinner']",
-        "related_questions": "[class*='related-question']",
+        "loading_indicator": "[class*='loading'], [class*='spinner'], [class*='thinking']",
+        "related_questions": "[class*='related-question'], [class*='suggestion']",
+        "new_chat_button": "button[aria-label*='New chat'], a[href='/']",
     },
     
     "grok": {
         "prompt_input": [
+            # New Grok UI (ProseMirror/TipTap editor) - 2026 version
+            "div.tiptap.ProseMirror[contenteditable='true']",
+            "div.ProseMirror[contenteditable='true']",
+            "div[contenteditable='true'].ProseMirror",
+            "div[contenteditable='true'].tiptap",
+            "div[contenteditable='true'][tabindex='0']",
+            # Fallbacks
+            "textarea[placeholder*='Ask Grok']",
             "textarea[placeholder*='message']",
+            "textarea[placeholder*='Message']",
             "[class*='chat-input']",
+            "[class*='message-input']",
+            "textarea[aria-label*='message']",
+            "div[contenteditable='true'][role='textbox']",
             "textarea",
         ],
         "submit_button": [
             "button[type='submit']",
+            "button[aria-label*='Send']",
+            "button[aria-label*='send']",
             "[class*='send-button']",
+            "button[class*='submit']",
+            "button:has(svg[class*='send'])",
+            "button[data-testid='send-button']",
         ],
-        "response_container": "[class*='message-content'], [class*='grok-response']",
-        "response_text": "[class*='markdown']",
-        "streaming_indicator": "[class*='typing'], [class*='loading']",
-        "sources_section": ".sources-section",
-        "source_card": ".source-preview, [class*='source-card']",
-        "x_post_embed": ".x-post-embed, [class*='tweet-embed']",
-        "error_message": ".error-banner, [class*='error']",
-        "loading_indicator": ".thinking-indicator, [class*='loading']",
-        "new_chat_button": "[class*='new-chat']",
+        # Grok 2026 UI: responses use .response-content-markdown and .markdown classes
+        "response_container": "div.response-content-markdown, div.markdown, [class*='response-content-markdown'], [class*='response-content'], [class*='message-content']",
+        "response_text": "div.response-content-markdown, div.markdown, p, h3, ul, ol",
+        "streaming_indicator": "[class*='typing'], [class*='loading'], [class*='streaming'], [class*='thinking'], [class*='animate-pulse']",
+        "sources_section": ".sources-section, [class*='sources'], [class*='citations']",
+        "source_card": ".source-preview, [class*='source-card'], [class*='citation']",
+        "x_post_embed": ".x-post-embed, [class*='tweet-embed'], [class*='x-post'], [class*='twitter-embed']",
+        "citation_link": "a[href^='http']:not([href*='grok.com']):not([href*='x.com'])",
+        "error_message": ".error-banner, [class*='error'], [role='alert']",
+        "loading_indicator": ".thinking-indicator, [class*='loading'], [class*='spinner']",
+        "new_chat_button": "[class*='new-chat'], button[aria-label*='New'], a[href='/']",
     },
 }
 
@@ -257,6 +307,12 @@ class RPAConfig:
     
     # Engine to use (can be overridden per prompt)
     default_engine: str = "chatgpt"
+
+    # Maximum number of sources to return per response (0 = unlimited).
+    # Note: some engines can surface a lot of citations; keep this reasonably high to avoid truncation.
+    max_sources_per_response: int = field(
+        default_factory=lambda: int(os.getenv("MAX_SOURCES_PER_RESPONSE", "200"))
+    )
     
     # Brand domain for visibility checking
     brand_domain: Optional[str] = field(

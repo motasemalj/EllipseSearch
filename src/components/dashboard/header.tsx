@@ -53,13 +53,9 @@ interface SearchResult {
   description?: string;
 }
 
-// Pages where search should be shown
 const SEARCH_ENABLED_PAGES = ["/brands", "/prompts", "/dashboard"];
-
-// Debounce delay for search (ms)
 const SEARCH_DEBOUNCE_MS = 400;
 
-// Memoized search result item for better performance
 const SearchResultItem = memo(function SearchResultItem({
   result,
   onClick,
@@ -69,14 +65,14 @@ const SearchResultItem = memo(function SearchResultItem({
 }) {
   return (
     <button
-      className="w-full px-4 py-3 flex items-center gap-3 hover:bg-muted/50 transition-colors text-left"
+      className="w-full px-3 py-2.5 flex items-center gap-3 hover:bg-muted/50 transition-colors text-left"
       onClick={onClick}
     >
-      <div className="p-2 rounded-lg bg-muted">
+      <div className="p-1.5 rounded bg-muted">
         {result.type === "brand" ? (
-          <Building2 className="w-4 h-4 text-primary" />
+          <Building2 className="w-3.5 h-3.5 text-primary" />
         ) : (
-          <FileSearch className="w-4 h-4 text-primary" />
+          <FileSearch className="w-3.5 h-3.5 text-primary" />
         )}
       </div>
       <div className="flex-1 min-w-0">
@@ -87,14 +83,13 @@ const SearchResultItem = memo(function SearchResultItem({
           </p>
         )}
       </div>
-      <Badge variant="outline" className="text-xs capitalize">
+      <Badge variant="outline" className="text-[10px] capitalize">
         {result.type}
       </Badge>
     </button>
   );
 });
 
-// Memoized notification item
 const NotificationItem = memo(function NotificationItem({
   notification,
   onRead,
@@ -118,7 +113,7 @@ const NotificationItem = memo(function NotificationItem({
   return (
     <div
       className={cn(
-        "relative px-4 py-3 hover:bg-muted/50 transition-colors border-b border-border last:border-0 cursor-pointer",
+        "relative px-4 py-3 hover:bg-muted/50 transition-colors border-b border-border last:border-0 cursor-pointer group",
         !notification.read && "bg-primary/5"
       )}
       onClick={onRead}
@@ -139,7 +134,7 @@ const NotificationItem = memo(function NotificationItem({
         <Button
           variant="ghost"
           size="icon"
-          className="h-6 w-6 opacity-0 group-hover:opacity-100 hover:opacity-100"
+          className="h-6 w-6 opacity-0 group-hover:opacity-100"
           onClick={(e) => {
             e.stopPropagation();
             onDismiss();
@@ -159,22 +154,16 @@ export function Header({ user, credits, onMenuClick }: HeaderProps) {
   const router = useRouter();
   const pathname = usePathname();
   
-  // Create supabase client once and memoize
   const supabase = useMemo(() => createClient(), []);
   
-  // Search state
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
   const [isSearching, setIsSearching] = useState(false);
   const [showSearchResults, setShowSearchResults] = useState(false);
   
-  // Ref for debounce timer
   const searchTimerRef = useRef<NodeJS.Timeout | null>(null);
-  
-  // Ref for abort controller
   const abortControllerRef = useRef<AbortController | null>(null);
   
-  // Notifications state
   const [notifications, setNotifications] = useState<Notification[]>([
     {
       id: "1",
@@ -200,7 +189,6 @@ export function Header({ user, credits, onMenuClick }: HeaderProps) {
     [notifications]
   );
   
-  // Check if search should be shown on current page
   const showSearch = useMemo(
     () => SEARCH_ENABLED_PAGES.some(page => pathname.startsWith(page)),
     [pathname]
@@ -212,9 +200,7 @@ export function Header({ user, credits, onMenuClick }: HeaderProps) {
     router.refresh();
   }, [supabase, router]);
 
-  // Optimized search with debouncing and cancellation
   const performSearch = useCallback(async (query: string) => {
-    // Cancel any ongoing search
     if (abortControllerRef.current) {
       abortControllerRef.current.abort();
     }
@@ -225,12 +211,10 @@ export function Header({ user, credits, onMenuClick }: HeaderProps) {
       return;
     }
 
-    // Create new abort controller for this search
     abortControllerRef.current = new AbortController();
     
     setIsSearching(true);
     try {
-      // Search brands and prompts in parallel for better performance
       const [brandsResult, promptsResult] = await Promise.all([
         supabase
           .from("brands")
@@ -244,7 +228,6 @@ export function Header({ user, credits, onMenuClick }: HeaderProps) {
           .limit(5),
       ]);
 
-      // Check if this search was cancelled
       if (abortControllerRef.current?.signal.aborted) {
         return;
       }
@@ -270,7 +253,6 @@ export function Header({ user, credits, onMenuClick }: HeaderProps) {
 
       setSearchResults(results);
     } catch (error) {
-      // Only log errors that aren't from cancellation
       if (error instanceof Error && error.name !== 'AbortError') {
         console.error("Search error:", error);
       }
@@ -279,19 +261,15 @@ export function Header({ user, credits, onMenuClick }: HeaderProps) {
     }
   }, [supabase]);
 
-  // Debounced search effect with proper cleanup
   useEffect(() => {
-    // Clear existing timer
     if (searchTimerRef.current) {
       clearTimeout(searchTimerRef.current);
     }
 
-    // Set new timer
     searchTimerRef.current = setTimeout(() => {
       performSearch(searchQuery);
     }, SEARCH_DEBOUNCE_MS);
 
-    // Cleanup on unmount or query change
     return () => {
       if (searchTimerRef.current) {
         clearTimeout(searchTimerRef.current);
@@ -299,7 +277,6 @@ export function Header({ user, credits, onMenuClick }: HeaderProps) {
     };
   }, [searchQuery, performSearch]);
 
-  // Cleanup abort controller on unmount
   useEffect(() => {
     return () => {
       if (abortControllerRef.current) {
@@ -318,25 +295,6 @@ export function Header({ user, credits, onMenuClick }: HeaderProps) {
     setShowSearchResults(false);
   }, [router]);
 
-  const handleSearchChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    setSearchQuery(e.target.value);
-    setShowSearchResults(true);
-  }, []);
-
-  const handleSearchFocus = useCallback(() => {
-    setShowSearchResults(true);
-  }, []);
-
-  const handleSearchBlur = useCallback(() => {
-    // Delay to allow click events to fire
-    setTimeout(() => setShowSearchResults(false), 200);
-  }, []);
-
-  const clearSearch = useCallback(() => {
-    setSearchQuery("");
-    setSearchResults([]);
-  }, []);
-
   const markAllAsRead = useCallback(() => {
     setNotifications(prev => prev.map(n => ({ ...n, read: true })));
   }, []);
@@ -352,53 +310,54 @@ export function Header({ user, credits, onMenuClick }: HeaderProps) {
   }, []);
 
   return (
-    <header className="sticky top-0 z-30 h-16 bg-background/80 backdrop-blur-lg border-b border-border">
-      <div className="h-full px-6 flex items-center justify-between gap-4">
-        {/* Left side - Mobile menu + Search */}
-        <div className="flex items-center gap-4 flex-1">
+    <header className="sticky top-0 z-30 h-14 bg-card/80 backdrop-blur-sm border-b border-border">
+      <div className="h-full px-4 lg:px-6 flex items-center justify-between gap-4">
+        {/* Left - Mobile menu + Search */}
+        <div className="flex items-center gap-3 flex-1">
           {onMenuClick && (
             <Button variant="ghost" size="icon" className="lg:hidden" onClick={onMenuClick}>
               <Menu className="w-5 h-5" />
             </Button>
           )}
           
-          {/* Search - only shown on relevant pages */}
           {showSearch && (
             <div className="hidden sm:flex items-center flex-1 max-w-md relative">
               <div className="relative w-full">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
                 <Input
-                  placeholder="Search brands, prompts..."
+                  placeholder="Search..."
                   value={searchQuery}
-                  onChange={handleSearchChange}
-                  onFocus={handleSearchFocus}
-                  onBlur={handleSearchBlur}
-                  className="pl-9 bg-muted/30 border-0 focus-visible:ring-1 focus-visible:ring-primary/50"
+                  onChange={(e) => {
+                    setSearchQuery(e.target.value);
+                    setShowSearchResults(true);
+                  }}
+                  onFocus={() => setShowSearchResults(true)}
+                  onBlur={() => setTimeout(() => setShowSearchResults(false), 200)}
+                  className="pl-9 h-9 bg-muted/50 border-0 focus-visible:ring-1"
                 />
                 {searchQuery && (
                   <Button
                     variant="ghost"
                     size="icon"
-                    className="absolute right-1 top-1/2 -translate-y-1/2 h-7 w-7"
-                    onClick={clearSearch}
+                    className="absolute right-1 top-1/2 -translate-y-1/2 h-6 w-6"
+                    onClick={() => {
+                      setSearchQuery("");
+                      setSearchResults([]);
+                    }}
                   >
                     <X className="w-3 h-3" />
                   </Button>
                 )}
               </div>
               
-              {/* Search Results Dropdown */}
               {showSearchResults && searchQuery && (
-                <div className="absolute top-full left-0 right-0 mt-2 bg-card border border-border rounded-xl shadow-lg overflow-hidden z-50">
+                <div className="absolute top-full left-0 right-0 mt-1 bg-card border border-border rounded-lg shadow-lg overflow-hidden z-50">
                   {isSearching ? (
-                    <div className="p-4 text-center text-muted-foreground text-sm">
-                      <div className="inline-flex items-center gap-2">
-                        <div className="w-4 h-4 border-2 border-primary border-t-transparent rounded-full animate-spin" />
-                        Searching...
-                      </div>
+                    <div className="p-3 text-center text-muted-foreground text-sm">
+                      Searching...
                     </div>
                   ) : searchResults.length > 0 ? (
-                    <div className="max-h-80 overflow-y-auto">
+                    <div className="max-h-64 overflow-y-auto">
                       {searchResults.map((result) => (
                         <SearchResultItem
                           key={`${result.type}-${result.id}`}
@@ -408,8 +367,8 @@ export function Header({ user, credits, onMenuClick }: HeaderProps) {
                       ))}
                     </div>
                   ) : (
-                    <div className="p-4 text-center text-muted-foreground text-sm">
-                      No results found for &quot;{searchQuery}&quot;
+                    <div className="p-3 text-center text-muted-foreground text-sm">
+                      No results found
                     </div>
                   )}
                 </div>
@@ -418,42 +377,41 @@ export function Header({ user, credits, onMenuClick }: HeaderProps) {
           )}
         </div>
 
-        {/* Right side - Credits, Notifications, User */}
-        <div className="flex items-center gap-2">
-          {/* Credits Display */}
+        {/* Right - Credits, Notifications, User */}
+        <div className="flex items-center gap-1.5">
+          {/* Credits */}
           {credits !== undefined && (
-            <div className="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-lg bg-primary/10 border border-primary/20">
-              <Coins className="w-4 h-4 text-primary" />
-              <span className="text-sm font-semibold text-primary tabular-nums">
+            <div className="hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-muted/50">
+              <Coins className="w-3.5 h-3.5 text-primary" />
+              <span className="text-sm font-semibold tabular-nums">
                 {credits.toLocaleString()}
               </span>
-              <span className="text-xs text-muted-foreground">credits</span>
             </div>
           )}
 
           {/* Notifications */}
           <DropdownMenu open={showNotifications} onOpenChange={setShowNotifications}>
             <DropdownMenuTrigger asChild>
-              <Button variant="ghost" size="icon" className="relative">
-                <Bell className="w-5 h-5" />
+              <Button variant="ghost" size="icon" className="relative h-9 w-9">
+                <Bell className="w-4 h-4" />
                 {unreadCount > 0 && (
                   <span className="absolute top-1 right-1 flex h-4 w-4 items-center justify-center">
                     <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-primary opacity-75" />
-                    <span className="relative inline-flex h-3 w-3 items-center justify-center rounded-full bg-primary text-[10px] font-bold text-primary-foreground">
+                    <span className="relative inline-flex h-3 w-3 items-center justify-center rounded-full bg-primary text-[9px] font-bold text-primary-foreground">
                       {unreadCount}
                     </span>
                   </span>
                 )}
               </Button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-80">
-              <div className="flex items-center justify-between px-4 py-3 border-b border-border">
-                <span className="font-semibold">Notifications</span>
+            <DropdownMenuContent align="end" className="w-72">
+              <div className="flex items-center justify-between px-4 py-2.5 border-b border-border">
+                <span className="font-semibold text-sm">Notifications</span>
                 {unreadCount > 0 && (
                   <Button
                     variant="ghost"
                     size="sm"
-                    className="h-auto py-1 px-2 text-xs text-primary hover:text-primary"
+                    className="h-auto py-0.5 px-1.5 text-xs text-primary hover:text-primary"
                     onClick={markAllAsRead}
                   >
                     Mark all read
@@ -462,7 +420,7 @@ export function Header({ user, credits, onMenuClick }: HeaderProps) {
               </div>
               
               {notifications.length > 0 ? (
-                <div className="max-h-80 overflow-y-auto">
+                <div className="max-h-64 overflow-y-auto">
                   {notifications.map((notification) => (
                     <NotificationItem
                       key={notification.id}
@@ -473,35 +431,23 @@ export function Header({ user, credits, onMenuClick }: HeaderProps) {
                   ))}
                 </div>
               ) : (
-                <div className="px-4 py-8 text-center text-muted-foreground text-sm">
-                  <Bell className="w-8 h-8 mx-auto mb-2 opacity-50" />
-                  No notifications yet
+                <div className="px-4 py-6 text-center text-muted-foreground text-sm">
+                  No notifications
                 </div>
               )}
-              
-              <div className="px-4 py-2 border-t border-border">
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="w-full text-xs"
-                  onClick={() => router.push("/settings")}
-                >
-                  Notification settings
-                </Button>
-              </div>
             </DropdownMenuContent>
           </DropdownMenu>
 
           {/* User Menu */}
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <Button variant="ghost" size="icon" className="rounded-full">
-                <div className="w-8 h-8 rounded-full bg-gradient-to-br from-primary to-primary/50 flex items-center justify-center">
-                  <User className="w-4 h-4 text-primary-foreground" />
+              <Button variant="ghost" size="icon" className="h-9 w-9">
+                <div className="w-7 h-7 rounded-full bg-primary/10 flex items-center justify-center">
+                  <User className="w-3.5 h-3.5 text-primary" />
                 </div>
               </Button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-56">
+            <DropdownMenuContent align="end" className="w-52">
               <DropdownMenuLabel>
                 <div className="flex flex-col">
                   <span className="text-sm font-medium">My Account</span>
@@ -516,7 +462,9 @@ export function Header({ user, credits, onMenuClick }: HeaderProps) {
                   <div className="px-2 py-1.5 text-sm text-muted-foreground">
                     <div className="flex items-center justify-between">
                       <span>Credits</span>
-                      <span className="font-semibold text-foreground tabular-nums">{credits.toLocaleString()}</span>
+                      <span className="font-semibold text-foreground tabular-nums">
+                        {credits.toLocaleString()}
+                      </span>
                     </div>
                   </div>
                   <DropdownMenuSeparator />

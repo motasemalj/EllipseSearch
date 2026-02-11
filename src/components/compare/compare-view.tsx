@@ -27,7 +27,10 @@ import {
   MessageSquare,
   Info,
   Sparkles,
+  Grid3X3,
+  Eye,
 } from "lucide-react";
+import { ChatGPTIcon, PerplexityIcon, GeminiIcon, GrokIcon } from "@/components/ui/engine-badge";
 import { cn } from "@/lib/utils";
 import type { SupportedEngine } from "@/types";
 import {
@@ -53,6 +56,13 @@ export type CompareStats = {
   avgScores?: { structure: number; dataDensity: number; directness: number };
 };
 
+export type MatrixItem = {
+  promptId: string;
+  promptText: string;
+  group: "a" | "b";
+  engines: Record<SupportedEngine, { visible: number; total: number; pct: number }>;
+};
+
 export type ComparePayload = {
   brandId: string;
   brandName: string;
@@ -76,6 +86,7 @@ export type ComparePayload = {
     byEngine: Array<{ label: string; a: number; b: number }>;
     trend: Array<{ date: string; a: number; b: number }>;
   };
+  matrix: MatrixItem[];
 };
 
 function SectionInfo({ description }: { description: string }) {
@@ -319,6 +330,15 @@ export function CompareView({ payload }: { payload: ComparePayload }) {
                   ))}
                 </div>
               </div>
+
+              {/* Results Matrix */}
+              {payload.matrix && payload.matrix.length > 0 && (
+                <ResultsMatrix 
+                  data={payload.matrix} 
+                  aLabel={payload.label.a} 
+                  bLabel={payload.label.b}
+                />
+              )}
             </>
           ) : (
             <Card className="p-12">
@@ -672,5 +692,209 @@ function EngineCompareCard({
         </div>
       </CardContent>
     </Card>
+  );
+}
+
+// Results Matrix Component
+function ResultsMatrix({ 
+  data, 
+  aLabel, 
+  bLabel 
+}: { 
+  data: MatrixItem[]; 
+  aLabel: string; 
+  bLabel: string; 
+}) {
+  const engines: SupportedEngine[] = ["chatgpt", "perplexity", "gemini", "grok"];
+  
+  const engineIcons: Record<SupportedEngine, React.ReactNode> = {
+    chatgpt: <ChatGPTIcon className="w-4 h-4" />,
+    perplexity: <PerplexityIcon className="w-4 h-4" />,
+    gemini: <GeminiIcon className="w-4 h-4" />,
+    grok: <GrokIcon className="w-4 h-4" />,
+  };
+  
+  const engineNames: Record<SupportedEngine, string> = {
+    chatgpt: "ChatGPT",
+    perplexity: "Perplexity",
+    gemini: "Gemini",
+    grok: "Grok",
+  };
+
+  const getVisibilityColor = (pct: number) => {
+    if (pct >= 70) return "bg-green-500";
+    if (pct >= 40) return "bg-amber-500";
+    if (pct > 0) return "bg-red-500";
+    return "bg-muted";
+  };
+
+  const getVisibilityBgColor = (pct: number) => {
+    if (pct >= 70) return "bg-green-500/10";
+    if (pct >= 40) return "bg-amber-500/10";
+    if (pct > 0) return "bg-red-500/10";
+    return "bg-muted/50";
+  };
+
+  // Separate data by group
+  const groupA = data.filter(d => d.group === "a");
+  const groupB = data.filter(d => d.group === "b");
+
+  return (
+    <Card className="overflow-hidden">
+      <CardHeader className="border-b bg-muted/30">
+        <div className="flex items-center gap-2">
+          <Grid3X3 className="w-5 h-5 text-primary" />
+          <div>
+            <CardTitle className="text-lg">Results Matrix</CardTitle>
+            <p className="text-sm text-muted-foreground mt-0.5">
+              Visibility results for each prompt across AI engines
+            </p>
+          </div>
+        </div>
+      </CardHeader>
+      <CardContent className="p-0">
+        <div className="overflow-x-auto">
+          <table className="w-full">
+            <thead>
+              <tr className="border-b bg-muted/20">
+                <th className="text-left p-3 text-sm font-medium text-muted-foreground w-[40%]">
+                  Prompt
+                </th>
+                {engines.map((engine) => (
+                  <th key={engine} className="p-3 text-center w-[15%]">
+                    <div className="flex items-center justify-center gap-1.5">
+                      {engineIcons[engine]}
+                      <span className="text-xs font-medium text-muted-foreground hidden sm:inline">
+                        {engineNames[engine]}
+                      </span>
+                    </div>
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {/* Group A Section */}
+              {groupA.length > 0 && (
+                <>
+                  <tr className="bg-primary/5 border-b">
+                    <td colSpan={5} className="p-2">
+                      <div className="flex items-center gap-2">
+                        <div className="w-5 h-5 rounded-full bg-primary/10 text-primary flex items-center justify-center text-xs font-bold">
+                          A
+                        </div>
+                        <span className="text-sm font-medium truncate">{aLabel}</span>
+                        <span className="text-xs text-muted-foreground">
+                          ({groupA.length} prompt{groupA.length !== 1 ? "s" : ""})
+                        </span>
+                      </div>
+                    </td>
+                  </tr>
+                  {groupA.map((item) => (
+                    <MatrixRow key={item.promptId} item={item} engines={engines} getVisibilityColor={getVisibilityColor} getVisibilityBgColor={getVisibilityBgColor} />
+                  ))}
+                </>
+              )}
+              
+              {/* Group B Section */}
+              {groupB.length > 0 && (
+                <>
+                  <tr className="bg-muted/30 border-b">
+                    <td colSpan={5} className="p-2">
+                      <div className="flex items-center gap-2">
+                        <div className="w-5 h-5 rounded-full bg-muted text-muted-foreground flex items-center justify-center text-xs font-bold">
+                          B
+                        </div>
+                        <span className="text-sm font-medium truncate">{bLabel}</span>
+                        <span className="text-xs text-muted-foreground">
+                          ({groupB.length} prompt{groupB.length !== 1 ? "s" : ""})
+                        </span>
+                      </div>
+                    </td>
+                  </tr>
+                  {groupB.map((item) => (
+                    <MatrixRow key={item.promptId} item={item} engines={engines} getVisibilityColor={getVisibilityColor} getVisibilityBgColor={getVisibilityBgColor} />
+                  ))}
+                </>
+              )}
+            </tbody>
+          </table>
+        </div>
+        
+        {/* Legend */}
+        <div className="px-4 py-3 border-t bg-muted/10 flex items-center justify-between">
+          <div className="flex items-center gap-4 text-xs">
+            <div className="flex items-center gap-1.5">
+              <div className="w-3 h-3 rounded bg-green-500" />
+              <span className="text-muted-foreground">High (70%+)</span>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <div className="w-3 h-3 rounded bg-amber-500" />
+              <span className="text-muted-foreground">Medium (40-70%)</span>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <div className="w-3 h-3 rounded bg-red-500" />
+              <span className="text-muted-foreground">Low (&lt;40%)</span>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <div className="w-3 h-3 rounded bg-muted border" />
+              <span className="text-muted-foreground">No data</span>
+            </div>
+          </div>
+          <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+            <Eye className="w-3.5 h-3.5" />
+            <span>Visible / Total</span>
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function MatrixRow({ 
+  item, 
+  engines,
+  getVisibilityColor,
+  getVisibilityBgColor,
+}: { 
+  item: MatrixItem; 
+  engines: SupportedEngine[];
+  getVisibilityColor: (pct: number) => string;
+  getVisibilityBgColor: (pct: number) => string;
+}) {
+  return (
+    <tr className="border-b hover:bg-muted/10 transition-colors">
+      <td className="p-3">
+        <p className="text-sm truncate max-w-[300px]" title={item.promptText}>
+          {item.promptText}
+        </p>
+      </td>
+      {engines.map((engine) => {
+        const engineData = item.engines[engine];
+        const hasData = engineData.total > 0;
+        
+        return (
+          <td key={engine} className="p-2 text-center">
+            <div className={cn(
+              "inline-flex flex-col items-center justify-center rounded-lg p-2 min-w-[70px] transition-colors",
+              hasData ? getVisibilityBgColor(engineData.pct) : "bg-muted/30"
+            )}>
+              {hasData ? (
+                <>
+                  <div className="flex items-center gap-1">
+                    <div className={cn("w-2 h-2 rounded-full", getVisibilityColor(engineData.pct))} />
+                    <span className="text-sm font-semibold">{engineData.pct}%</span>
+                  </div>
+                  <span className="text-[10px] text-muted-foreground mt-0.5">
+                    {engineData.visible}/{engineData.total}
+                  </span>
+                </>
+              ) : (
+                <span className="text-xs text-muted-foreground">—</span>
+              )}
+            </div>
+          </td>
+        );
+      })}
+    </tr>
   );
 }

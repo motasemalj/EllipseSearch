@@ -16,6 +16,9 @@
 
 import OpenAI from "openai";
 import { OPENAI_CHAT_MODEL } from "@/lib/ai/openai-config";
+import { UNTRUSTED_CONTENT_POLICY, JSON_ONLY_POLICY } from "@/lib/ai/prompt-policies";
+import { callOpenAIResponses, extractOpenAIResponsesText } from "@/lib/ai/llm-runtime";
+import { LLM_TIMEOUTS_MS } from "@/lib/ai/openai-timeouts";
 import type {
   AEOScore,
   AEOScoreBreakdown,
@@ -169,6 +172,7 @@ export async function calculateAEOScore(input: AEOScoringInput): Promise<AEOScor
     breakdown,
     penalties,
     analysis_notes: analysisNotes,
+    llm_usage: aiAnalysis.llm_usage,
   };
 }
 
@@ -424,6 +428,7 @@ interface AIAnalysisResult {
   accuracy_reasoning: string;
   misattribution_detected: boolean;
   hallucination_details?: string;
+  llm_usage?: unknown;
 }
 
 async function analyzeWithAI(
@@ -461,7 +466,12 @@ Your task is to:
 2. Check for any misattributions or hallucinations (false claims about products/services the brand doesn't offer)
 ${groundTruthContent ? "3. Use the provided GROUND TRUTH content from the brand's website as the authoritative source for verification" : ""}
 
-Return your analysis as valid JSON only.`;
+CRITICAL OUTPUT RULES (MUST FOLLOW):
+- Output MUST be strict RFC 8259 JSON (no trailing commas, no comments).
+- Output ONLY JSON (no markdown fences, no prose).
+- Use double quotes for all strings.`;
+ 
+  const hardenedSystemPrompt = `${UNTRUSTED_CONTENT_POLICY}\n\n${systemPrompt}\n\n${JSON_ONLY_POLICY}`;
 
   const userPrompt = `Analyze this AI-generated content for a brand:
 
@@ -500,23 +510,102 @@ ${groundTruthContent
     ? "- Compare claims against the GROUND TRUTH content\n- Any product/service/feature not mentioned in ground truth is potentially a hallucination\n- Flag specific mismatches between AI response and ground truth"
     : "- Look for any claims about products, services, or capabilities the brand likely doesn't have\n- Consider if facts stated about the brand match their known offerings\n- If uncertain about the brand, lean towards \"not detected\" unless clearly false"}`;
 
+  // Structured Outputs (Responses API) to avoid flaky JSON parsing
+  const aeoSchema = {
+    type: "json_schema",
+    name: "aeo_accuracy_check",
+    strict: true,
+    schema: {
+      type: "object",
+      additionalProperties: false,
+      required: ["accuracy_assessment", "misattribution_check"],
+      properties: {
+        accuracy_assessment: {
+          type: "object",
+          additionalProperties: false,
+          required: ["quality", "score", "reasoning"],
+          properties: {
+            quality: { type: "string", enum: ["accurate", "vague", "none"] },
+            score: { type: "number", enum: [15, 5, 0] },
+            reasoning: { type: "string" },
+          },
+        },
+        misattribution_check: {
+          type: "object",
+          additionalProperties: false,
+          required: ["detected", "details"],
+          properties: {
+            detected: { type: "boolean" },
+            details: { type: "string" },
+          },
+        },
+      },
+    },
+  } as const;
+
   try {
-    const response = await openai.chat.completions.create({
+    // Use Responses API for best compatibility with gpt-5-* family
+    const { response, usage } = await callOpenAIResponses({
+      client: openai,
+      provider: "openai",
       model: OPENAI_CHAT_MODEL,
-      messages: [
-        { role: "system", content: systemPrompt },
+      timeoutMs: LLM_TIMEOUTS_MS.aeoScoring,
+      request: {
+      model: OPENAI_CHAT_MODEL,
+      input: [
+        { role: "system", content: hardenedSystemPrompt },
         { role: "user", content: userPrompt },
       ],
-      response_format: { type: "json_object" },
-      max_completion_tokens: 500,
+      reasoning: { effort: "low" },
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      text: { verbosity: "low", format: aeoSchema as Record<string, unknown> },
+      // a bit higher to reduce incomplete:max_output_tokens
+      max_output_tokens: 900,
+      } as unknown as Parameters<typeof openai.responses.create>[0],
     });
 
-    const content = response.choices[0]?.message?.content;
-    if (!content) {
-      throw new Error("Empty response from AI analysis");
+    const content = extractOpenAIResponsesText(response);
+    if (!content || content.trim().length === 0) {
+      throw new Error("Empty response from AI analysis (no output_text/content)");
     }
 
-    const parsed = JSON.parse(content);
+    // Robust JSON parsing with recovery for malformed responses
+    let parsed;
+    try {
+      parsed = JSON.parse(content);
+    } catch (parseError) {
+      console.error("[AEO] JSON parse error, attempting recovery:", parseError);
+      // Try to extract valid JSON
+      const jsonStart = content.indexOf("{");
+      const jsonEnd = content.lastIndexOf("}");
+      if (jsonStart !== -1 && jsonEnd !== -1 && jsonEnd > jsonStart) {
+        try {
+          const cleanedContent = content.slice(jsonStart, jsonEnd + 1)
+            .replace(/,\s*}/g, "}")
+            .replace(/,\s*]/g, "]")
+            .replace(/'/g, '"')
+            .replace(/[\x00-\x1F\x7F]/g, " "); // Remove control characters
+          parsed = JSON.parse(cleanedContent);
+          console.log("[AEO] JSON recovery successful");
+        } catch {
+          console.error("[AEO] JSON recovery failed, using defaults");
+          // Return safe defaults
+          return {
+            accuracy_score: 5,
+            accuracy_quality: "vague" as const,
+            accuracy_reasoning: "Analysis could not parse AI response",
+            misattribution_detected: false,
+          };
+        }
+      } else {
+        return {
+          accuracy_score: 5,
+          accuracy_quality: "vague" as const,
+          accuracy_reasoning: "Analysis could not parse AI response",
+          misattribution_detected: false,
+        };
+      }
+    }
 
     const qualityMap: Record<string, "accurate" | "vague" | "none"> = {
       accurate: "accurate",
@@ -530,6 +619,7 @@ ${groundTruthContent
       accuracy_reasoning: parsed.accuracy_assessment?.reasoning || "",
       misattribution_detected: Boolean(parsed.misattribution_check?.detected),
       hallucination_details: parsed.misattribution_check?.details,
+      llm_usage: usage,
     };
   } catch (error) {
     console.error("AI analysis failed:", error);

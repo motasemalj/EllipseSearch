@@ -157,6 +157,12 @@ class BaseEngine(ABC):
         if not self.page:
             return False
         
+        # Wait for page to be in a stable state
+        try:
+            self.page.wait_for_load_state("domcontentloaded", timeout=5000)
+        except:
+            pass
+        
         # Try to find input element
         input_selectors = self.selectors.get("prompt_input", [])
         if isinstance(input_selectors, str):
@@ -165,7 +171,7 @@ class BaseEngine(ABC):
         for selector in input_selectors:
             try:
                 element = self.page.locator(selector).first
-                if element.is_visible(timeout=1000):
+                if element.is_visible(timeout=2000):
                     return True
             except:
                 pass
@@ -174,6 +180,15 @@ class BaseEngine(ABC):
     
     def _wait_for_ready(self, timeout: int = 30) -> None:
         """Wait for the page to be ready for input."""
+        # First, wait for page to be in a stable state
+        try:
+            self.page.wait_for_load_state("networkidle", timeout=min(timeout * 1000, 10000))
+        except:
+            try:
+                self.page.wait_for_load_state("domcontentloaded", timeout=min(timeout * 1000, 10000))
+            except:
+                pass
+        
         input_selectors = self.selectors.get("prompt_input", [])
         if isinstance(input_selectors, str):
             input_selectors = [input_selectors]
@@ -182,15 +197,26 @@ class BaseEngine(ABC):
         while time.time() - start < timeout:
             for selector in input_selectors:
                 try:
-                    self.page.wait_for_selector(
-                        selector,
-                        state="visible",
-                        timeout=5000
-                    )
-                    return
+                    element = self.page.locator(selector).first
+                    if element.is_visible(timeout=3000):
+                        # Additional check: element should be enabled/editable
+                        try:
+                            if element.is_enabled():
+                                return
+                        except:
+                            return  # If we can't check enabled state, assume it's ready
                 except:
                     pass
             time.sleep(1)
+        
+        # Last attempt with all selectors
+        for selector in input_selectors:
+            try:
+                element = self.page.locator(selector).first
+                if element.is_visible(timeout=2000):
+                    return
+            except:
+                pass
         
         raise TimeoutError(f"{self.engine_name} input not found after {timeout}s")
     

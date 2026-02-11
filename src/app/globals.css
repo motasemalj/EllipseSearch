@@ -3,22 +3,20 @@
 @tailwind utilities;
 
 /* ===========================================
-   ELLIPSE SEARCH - Premium Design System
-   A distinctive, agency-grade aesthetic
+   ELLIPSE SEARCH - Enterprise Design System
+   Professional B2B analytics aesthetic
    =========================================== */
 
 /* ===========================================
    PERFORMANCE OPTIMIZATIONS
    =========================================== */
 
-/* Enable GPU acceleration for transforms and opacity */
 .gpu-accelerated {
   transform: translateZ(0);
   will-change: transform;
   backface-visibility: hidden;
 }
 
-/* Reduce paint areas for animated elements */
 @media (prefers-reduced-motion: no-preference) {
   .animate-fade-in,
   .animate-slide-in-up,
@@ -28,7 +26,6 @@
   }
 }
 
-/* Respect user motion preferences */
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
@@ -40,12 +37,10 @@
   }
 }
 
-/* Optimize rendering for lists */
 .virtualized-list {
   contain: layout style;
 }
 
-/* Content visibility for off-screen optimization */
 .content-auto {
   content-visibility: auto;
   contain-intrinsic-size: 0 500px;
@@ -53,93 +48,104 @@
 
 @layer base {
   :root {
-    /* Core palette - Warm cream with sophisticated blue accents */
-    --background: 220 20% 96%;
-    --foreground: 215 28% 17%;
-    --card: 0 0% 99%;
-    --card-foreground: 215 28% 17%;
-    --popover: 0 0% 99%;
-    --popover-foreground: 215 28% 17%;
+    /* Enterprise Light Mode - Clean, Professional, Data-Focused */
+    --background: 0 0% 98%;
+    --foreground: 222 47% 11%;
     
-    /* Primary: Ocean Blue */
-    --primary: 210 100% 45%;
+    /* Card surfaces - crisp white for data clarity */
+    --card: 0 0% 100%;
+    --card-foreground: 222 47% 11%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 222 47% 11%;
+    
+    /* Primary: Professional blue - trust, enterprise */
+    --primary: 221 83% 53%;
     --primary-foreground: 0 0% 100%;
     
-    /* Secondary: Cool slate */
-    --secondary: 215 25% 92%;
-    --secondary-foreground: 215 28% 17%;
+    /* Secondary: Neutral gray for supporting elements */
+    --secondary: 220 14% 96%;
+    --secondary-foreground: 222 47% 11%;
     
-    /* Muted: Soft gray-blue */
-    --muted: 215 20% 93%;
-    --muted-foreground: 215 16% 47%;
+    /* Muted: Subtle backgrounds */
+    --muted: 220 14% 96%;
+    --muted-foreground: 220 9% 46%;
     
-    /* Accent: Teal highlight */
-    --accent: 188 78% 41%;
+    /* Accent: Teal for highlights/CTAs */
+    --accent: 173 80% 40%;
     --accent-foreground: 0 0% 100%;
     
     /* Destructive */
-    --destructive: 0 72% 51%;
+    --destructive: 0 84% 60%;
     --destructive-foreground: 0 0% 100%;
     
-    /* Borders */
-    --border: 215 20% 88%;
-    --input: 215 20% 88%;
-    --ring: 210 100% 45%;
+    /* Borders - subtle, clean lines */
+    --border: 220 13% 91%;
+    --input: 220 13% 91%;
+    --ring: 221 83% 53%;
     
-    /* Radius - Generous curves */
-    --radius: 0.875rem;
+    /* Radius - subtle, professional */
+    --radius: 0.5rem;
     
-    /* Engine colors */
-    --engine-chatgpt: 160 84% 39%;
-    --engine-perplexity: 270 76% 55%;
-    --engine-gemini: 217 91% 60%;
-    --engine-grok: 0 0% 20%;
+    /* Engine colors - subdued for enterprise */
+    --engine-chatgpt: 158 64% 40%;
+    --engine-perplexity: 262 52% 47%;
+    --engine-gemini: 217 91% 50%;
+    --engine-grok: 220 9% 30%;
     
-    /* Status colors */
-    --success: 152 69% 40%;
+    /* Status colors - clear, accessible */
+    --success: 142 71% 45%;
     --success-foreground: 0 0% 100%;
     --warning: 38 92% 50%;
     --warning-foreground: 0 0% 0%;
     --info: 199 89% 48%;
     --info-foreground: 0 0% 100%;
+    
+    /* Data visualization palette */
+    --chart-1: 221 83% 53%;
+    --chart-2: 173 80% 40%;
+    --chart-3: 262 52% 47%;
+    --chart-4: 38 92% 50%;
+    --chart-5: 142 71% 45%;
   }
 
   .dark {
-    /* Dark mode - Sophisticated slate with vibrant blue accents (lighter background) */
-    --background: 220 18% 14%;
-    --foreground: 210 40% 96%;
-    --card: 220 18% 17%;
-    --card-foreground: 210 40% 96%;
-    --popover: 220 18% 17%;
-    --popover-foreground: 210 40% 96%;
+    /* Enterprise Dark Mode - Refined, Less Heavy */
+    --background: 220 20% 12%;
+    --foreground: 210 40% 98%;
     
-    /* Primary: Bright sky blue in dark mode */
-    --primary: 205 90% 55%;
+    /* Card surfaces - slightly elevated from background */
+    --card: 220 20% 16%;
+    --card-foreground: 210 40% 98%;
+    --popover: 220 20% 16%;
+    --popover-foreground: 210 40% 98%;
+    
+    /* Primary - vibrant blue */
+    --primary: 217 91% 60%;
     --primary-foreground: 0 0% 100%;
     
-    /* Secondary */
-    --secondary: 220 16% 22%;
-    --secondary-foreground: 210 40% 96%;
+    /* Secondary - subtle contrast */
+    --secondary: 220 18% 22%;
+    --secondary-foreground: 210 40% 98%;
     
-    /* Muted */
-    --muted: 220 16% 22%;
+    /* Muted - softer than before */
+    --muted: 220 18% 20%;
     --muted-foreground: 215 20% 60%;
     
     /* Accent */
-    --accent: 188 78% 45%;
+    --accent: 173 80% 45%;
     --accent-foreground: 0 0% 100%;
     
     /* Destructive */
-    --destructive: 0 63% 50%;
+    --destructive: 0 63% 55%;
     --destructive-foreground: 0 0% 100%;
     
-    /* Borders */
-    --border: 220 16% 26%;
-    --input: 220 16% 26%;
-    --ring: 205 90% 55%;
+    /* Borders - more visible */
+    --border: 220 18% 24%;
+    --input: 220 18% 22%;
+    --ring: 217 91% 60%;
     
-    /* Status colors - slightly adjusted for dark mode */
-    --success: 152 69% 45%;
+    /* Status colors */
+    --success: 142 71% 50%;
     --success-foreground: 0 0% 100%;
     --warning: 38 92% 55%;
     --warning-foreground: 0 0% 0%;
@@ -152,28 +158,44 @@
   * {
     @apply border-border;
   }
+  
   body {
     @apply bg-background text-foreground antialiased;
-    font-feature-settings: "rlig" 1, "calt" 1;
+    font-feature-settings: "rlig" 1, "calt" 1, "ss01" 1;
   }
   
-  /* Typography refinements */
+  /* Typography - Enterprise Professional */
   h1, h2, h3, h4, h5, h6 {
-    @apply tracking-tight font-semibold;
+    @apply tracking-tight font-semibold text-foreground;
+    letter-spacing: -0.02em;
   }
   
-  h1 { @apply text-3xl md:text-4xl; }
-  h2 { @apply text-2xl md:text-3xl; }
-  h3 { @apply text-xl md:text-2xl; }
+  h1 { @apply text-2xl md:text-3xl font-bold; }
+  h2 { @apply text-xl md:text-2xl font-semibold; }
+  h3 { @apply text-lg md:text-xl font-semibold; }
+  h4 { @apply text-base font-semibold; }
+  
+  p {
+    @apply text-muted-foreground leading-relaxed;
+  }
+  
+  /* Data-focused typography */
+  .data-value {
+    @apply font-semibold tabular-nums tracking-tight;
+  }
+  
+  .data-label {
+    @apply text-xs font-medium uppercase tracking-wider text-muted-foreground;
+  }
 }
 
 /* ===========================================
-   Custom Scrollbar - Minimal & elegant
+   Custom Scrollbar - Minimal & Professional
    =========================================== */
 
 ::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+  width: 6px;
+  height: 6px;
 }
 
 ::-webkit-scrollbar-track {
@@ -181,145 +203,152 @@
 }
 
 ::-webkit-scrollbar-thumb {
-  @apply bg-muted-foreground/20 rounded-full;
+  @apply bg-border rounded-full;
   transition: background 0.2s;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  @apply bg-muted-foreground/40;
+  @apply bg-muted-foreground/30;
 }
 
-/* Firefox */
 * {
   scrollbar-width: thin;
-  scrollbar-color: hsl(var(--muted-foreground) / 0.2) transparent;
+  scrollbar-color: hsl(var(--border)) transparent;
 }
 
 /* ===========================================
-   Focus States - Accessible & beautiful
+   Focus States - Accessible
    =========================================== */
 
 *:focus-visible {
-  @apply outline-none ring-2 ring-primary/50 ring-offset-2 ring-offset-background;
+  @apply outline-none ring-2 ring-primary/40 ring-offset-2 ring-offset-background;
 }
 
 /* ===========================================
-   Glass Morphism Effects
+   Enterprise Card System
    =========================================== */
 
-.glass {
-  @apply bg-background/70 backdrop-blur-xl;
-  -webkit-backdrop-filter: blur(12px);
+.enterprise-card {
+  @apply bg-card border border-border rounded-lg shadow-sm;
 }
 
-.glass-card {
-  @apply bg-card/80 backdrop-blur-lg border border-border/50 shadow-xl;
-  -webkit-backdrop-filter: blur(12px);
+.enterprise-card-header {
+  @apply px-5 py-4 border-b border-border;
 }
 
-.glass-dark {
-  @apply bg-black/40 backdrop-blur-xl;
-  -webkit-backdrop-filter: blur(12px);
+.enterprise-card-body {
+  @apply p-5;
+}
+
+.enterprise-card-footer {
+  @apply px-5 py-3 border-t border-border bg-muted/30;
+}
+
+/* Metric Cards */
+.metric-card {
+  @apply bg-card border border-border rounded-lg p-5;
+}
+
+.metric-card-value {
+  @apply text-3xl font-bold tabular-nums tracking-tight;
+}
+
+.metric-card-label {
+  @apply text-sm font-medium text-muted-foreground mt-1;
+}
+
+.metric-card-delta {
+  @apply inline-flex items-center gap-1 text-xs font-medium mt-2 px-1.5 py-0.5 rounded;
+}
+
+.metric-card-delta.positive {
+  @apply bg-success/10 text-success;
+}
+
+.metric-card-delta.negative {
+  @apply bg-destructive/10 text-destructive;
 }
 
 /* ===========================================
-   Gradient Backgrounds
+   Tab Navigation - Enterprise Style
    =========================================== */
 
-.gradient-bg {
-  background: 
-    radial-gradient(ellipse 80% 50% at 50% -20%, hsl(var(--primary) / 0.12), transparent),
-    linear-gradient(to bottom, hsl(var(--background)), hsl(var(--background)));
+.enterprise-tabs {
+  @apply border-b border-border;
 }
 
-.gradient-primary {
-  background: linear-gradient(135deg, hsl(var(--primary)) 0%, hsl(210 100% 35%) 100%);
+.enterprise-tab {
+  @apply relative px-4 py-3 text-sm font-medium text-muted-foreground transition-colors;
+  @apply hover:text-foreground;
 }
 
-.gradient-accent {
-  background: linear-gradient(135deg, hsl(var(--accent)) 0%, hsl(188 78% 32%) 100%);
+.enterprise-tab.active {
+  @apply text-foreground;
 }
 
-.gradient-mesh {
-  background: 
-    radial-gradient(at 40% 20%, hsl(var(--primary) / 0.08) 0px, transparent 50%),
-    radial-gradient(at 80% 0%, hsl(var(--accent) / 0.08) 0px, transparent 50%),
-    radial-gradient(at 0% 50%, hsl(var(--primary) / 0.06) 0px, transparent 50%),
-    radial-gradient(at 80% 50%, hsl(var(--accent) / 0.06) 0px, transparent 50%),
-    radial-gradient(at 0% 100%, hsl(var(--primary) / 0.04) 0px, transparent 50%),
-    hsl(var(--background));
-}
-
-/* Dashboard sidebar gradient */
-.gradient-sidebar {
-  background: linear-gradient(180deg, 
-    hsl(var(--card)) 0%, 
-    hsl(var(--card) / 0.95) 50%,
-    hsl(var(--primary) / 0.02) 100%
-  );
-}
-
-/* ===========================================
-   Card Effects
-   =========================================== */
-
-.card-hover {
-  @apply transition-all duration-300;
-}
-
-.card-hover:hover {
-  @apply shadow-xl shadow-primary/5 border-primary/20 -translate-y-0.5;
-}
-
-.card-interactive {
-  @apply transition-all duration-200 cursor-pointer;
-}
-
-.card-interactive:hover {
-  @apply bg-muted/50 border-primary/30;
-}
-
-.card-glow {
-  @apply relative;
-}
-
-.card-glow::before {
+.enterprise-tab.active::after {
   content: '';
-  @apply absolute inset-0 rounded-2xl opacity-0 transition-opacity duration-300;
-  background: radial-gradient(
-    600px circle at var(--mouse-x, 50%) var(--mouse-y, 50%),
-    hsl(var(--primary) / 0.1),
-    transparent 40%
-  );
-}
-
-.card-glow:hover::before {
-  @apply opacity-100;
+  @apply absolute bottom-0 left-0 right-0 h-0.5 bg-primary;
 }
 
 /* ===========================================
-   Animated Gradients
+   Data Tables - Professional Analytics
    =========================================== */
 
-@keyframes gradient-shift {
-  0%, 100% { background-position: 0% 50%; }
-  50% { background-position: 100% 50%; }
+.enterprise-table {
+  @apply w-full text-sm;
 }
 
-.animated-gradient {
-  background: linear-gradient(
-    270deg,
-    hsl(var(--primary)),
-    hsl(var(--accent)),
-    hsl(205 90% 60%),
-    hsl(var(--primary))
-  );
-  background-size: 400% 400%;
-  animation: gradient-shift 8s ease infinite;
+.enterprise-table th {
+  @apply px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-muted-foreground bg-muted/50 border-b border-border;
+}
+
+.enterprise-table td {
+  @apply px-4 py-3 border-b border-border;
+}
+
+.enterprise-table tr:hover td {
+  @apply bg-muted/30;
+}
+
+.enterprise-table tr:last-child td {
+  @apply border-b-0;
 }
 
 /* ===========================================
-   Engine-specific styles
+   Status Badges
+   =========================================== */
+
+.status-badge {
+  @apply inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-medium;
+}
+
+.status-badge.success {
+  background-color: hsl(var(--success) / 0.1);
+  color: hsl(var(--success));
+}
+
+.status-badge.warning {
+  background-color: hsl(var(--warning) / 0.1);
+  color: hsl(var(--warning));
+}
+
+.status-badge.error {
+  background-color: hsl(var(--destructive) / 0.1);
+  color: hsl(var(--destructive));
+}
+
+.status-badge.info {
+  background-color: hsl(var(--info) / 0.1);
+  color: hsl(var(--info));
+}
+
+.status-badge.neutral {
+  @apply bg-muted text-muted-foreground;
+}
+
+/* ===========================================
+   Engine Badges - Consistent Branding
    =========================================== */
 
 .engine-chatgpt { --engine-color: var(--engine-chatgpt); }
@@ -328,144 +357,175 @@
 .engine-grok { --engine-color: var(--engine-grok); }
 
 .engine-badge {
-  @apply inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium;
-  background: hsl(var(--engine-color) / 0.15);
+  @apply inline-flex items-center gap-1.5 px-2 py-1 rounded text-xs font-medium;
+  background: hsl(var(--engine-color) / 0.1);
   color: hsl(var(--engine-color));
-  border: 1px solid hsl(var(--engine-color) / 0.25);
 }
 
-.engine-badge-solid {
-  @apply inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium text-white;
+.engine-dot {
+  @apply w-2 h-2 rounded-full;
   background: hsl(var(--engine-color));
 }
 
 /* ===========================================
-   Score Indicators
+   Progress & Loading States
    =========================================== */
 
-.score-ring {
-  @apply relative inline-flex items-center justify-center;
+.progress-bar {
+  @apply h-1.5 bg-muted rounded-full overflow-hidden;
 }
 
-.score-ring svg {
-  transform: rotate(-90deg);
+.progress-bar-fill {
+  @apply h-full bg-primary rounded-full transition-all duration-500;
 }
 
-.score-ring .score-value {
-  @apply absolute text-2xl font-bold;
-}
-
-/* Score colors */
-.score-excellent { --score-color: 152 69% 40%; }
-.score-good { --score-color: 188 78% 41%; }
-.score-fair { --score-color: 38 92% 50%; }
-.score-poor { --score-color: 0 72% 51%; }
-
-/* ===========================================
-   Visibility Indicator
-   =========================================== */
-
-.visibility-visible {
-  @apply relative;
-}
-
-.visibility-visible::after {
-  content: '';
-  @apply absolute -inset-px rounded-2xl;
-  background: linear-gradient(135deg, 
-    hsl(var(--success) / 0.2) 0%, 
-    transparent 50%
-  );
-  pointer-events: none;
-}
-
-.visibility-hidden {
-  @apply relative;
-}
-
-.visibility-hidden::after {
-  content: '';
-  @apply absolute -inset-px rounded-2xl;
-  background: linear-gradient(135deg, 
-    hsl(var(--destructive) / 0.1) 0%, 
-    transparent 50%
-  );
-  pointer-events: none;
+.skeleton {
+  @apply bg-muted rounded animate-pulse;
 }
 
 /* ===========================================
-   Animations
+   Visibility Indicators
+   =========================================== */
+
+.visibility-high {
+  @apply text-success;
+}
+
+.visibility-medium {
+  @apply text-warning;
+}
+
+.visibility-low {
+  @apply text-destructive;
+}
+
+/* Score Bars */
+.score-bar {
+  @apply h-2 bg-muted rounded-full overflow-hidden;
+}
+
+.score-bar-fill {
+  @apply h-full rounded-full transition-all duration-300;
+}
+
+.score-bar-fill.excellent { @apply bg-success; }
+.score-bar-fill.good { @apply bg-info; }
+.score-bar-fill.fair { @apply bg-warning; }
+.score-bar-fill.poor { @apply bg-destructive; }
+
+/* ===========================================
+   Animations - Subtle & Professional
    =========================================== */
 
 @keyframes fade-in {
-  from { opacity: 0; transform: translateY(8px); }
+  from { opacity: 0; transform: translateY(4px); }
   to { opacity: 1; transform: translateY(0); }
 }
 
 @keyframes slide-in-right {
-  from { opacity: 0; transform: translateX(-12px); }
+  from { opacity: 0; transform: translateX(-8px); }
   to { opacity: 1; transform: translateX(0); }
 }
 
 @keyframes slide-in-up {
-  from { opacity: 0; transform: translateY(12px); }
+  from { opacity: 0; transform: translateY(8px); }
   to { opacity: 1; transform: translateY(0); }
 }
 
 @keyframes scale-in {
-  from { opacity: 0; transform: scale(0.95); }
+  from { opacity: 0; transform: scale(0.98); }
   to { opacity: 1; transform: scale(1); }
 }
 
 @keyframes pulse-subtle {
   0%, 100% { opacity: 1; }
-  50% { opacity: 0.7; }
+  50% { opacity: 0.8; }
 }
 
-@keyframes shimmer {
-  0% { background-position: -200% 0; }
-  100% { background-position: 200% 0; }
-}
-
-.animate-fade-in { animation: fade-in 0.4s ease-out; }
-.animate-slide-in-right { animation: slide-in-right 0.3s ease-out; }
-.animate-slide-in-up { animation: slide-in-up 0.4s ease-out; }
-.animate-scale-in { animation: scale-in 0.3s ease-out; }
+.animate-fade-in { animation: fade-in 0.3s ease-out; }
+.animate-slide-in-right { animation: slide-in-right 0.2s ease-out; }
+.animate-slide-in-up { animation: slide-in-up 0.3s ease-out; }
+.animate-scale-in { animation: scale-in 0.2s ease-out; }
 .animate-pulse-subtle { animation: pulse-subtle 2s ease-in-out infinite; }
 
-.animate-shimmer {
-  background: linear-gradient(
-    90deg,
-    hsl(var(--muted) / 0.3) 0%,
-    hsl(var(--muted) / 0.6) 50%,
-    hsl(var(--muted) / 0.3) 100%
-  );
-  background-size: 200% 100%;
-  animation: shimmer 1.5s ease-in-out infinite;
-}
-
-/* Staggered children animation */
+/* Staggered children */
 .stagger-children > * {
   @apply animate-fade-in;
 }
 
 .stagger-children > *:nth-child(1) { animation-delay: 0ms; }
-.stagger-children > *:nth-child(2) { animation-delay: 50ms; }
-.stagger-children > *:nth-child(3) { animation-delay: 100ms; }
-.stagger-children > *:nth-child(4) { animation-delay: 150ms; }
-.stagger-children > *:nth-child(5) { animation-delay: 200ms; }
-.stagger-children > *:nth-child(6) { animation-delay: 250ms; }
+.stagger-children > *:nth-child(2) { animation-delay: 40ms; }
+.stagger-children > *:nth-child(3) { animation-delay: 80ms; }
+.stagger-children > *:nth-child(4) { animation-delay: 120ms; }
+.stagger-children > *:nth-child(5) { animation-delay: 160ms; }
+.stagger-children > *:nth-child(6) { animation-delay: 200ms; }
 
 /* ===========================================
-   Data Visualization
+   Charts & Data Visualization
    =========================================== */
 
+.chart-container {
+  @apply w-full;
+}
+
 .chart-tooltip {
-  @apply glass-card px-3 py-2 rounded-lg text-sm shadow-xl;
+  @apply bg-popover text-popover-foreground px-3 py-2 rounded-lg text-sm shadow-lg border border-border;
+}
+
+.chart-legend {
+  @apply flex flex-wrap gap-4 text-xs;
+}
+
+.chart-legend-item {
+  @apply flex items-center gap-1.5;
+}
+
+.chart-legend-dot {
+  @apply w-2.5 h-2.5 rounded-full;
 }
 
 /* ===========================================
-   Prose Styles (AI Response rendering)
+   Form Elements - Clean
+   =========================================== */
+
+.form-section {
+  @apply space-y-4;
+}
+
+.form-label {
+  @apply text-sm font-medium text-foreground;
+}
+
+.form-description {
+  @apply text-xs text-muted-foreground mt-1;
+}
+
+.form-error {
+  @apply text-xs text-destructive mt-1;
+}
+
+/* ===========================================
+   Empty States
+   =========================================== */
+
+.empty-state {
+  @apply py-12 text-center;
+}
+
+.empty-state-icon {
+  @apply w-12 h-12 mx-auto mb-4 text-muted-foreground/50;
+}
+
+.empty-state-title {
+  @apply text-lg font-semibold text-foreground;
+}
+
+.empty-state-description {
+  @apply text-sm text-muted-foreground mt-1 max-w-md mx-auto;
+}
+
+/* ===========================================
+   Prose - Content Rendering
    =========================================== */
 
 .prose {
@@ -489,10 +549,6 @@
   @apply leading-relaxed;
 }
 
-.prose li::marker {
-  @apply text-primary;
-}
-
 .prose strong {
   @apply font-semibold text-foreground;
 }
@@ -502,15 +558,11 @@
 }
 
 .prose pre {
-  @apply bg-muted rounded-xl p-4 overflow-x-auto border border-border;
+  @apply bg-muted rounded-lg p-4 overflow-x-auto border border-border;
 }
 
 .prose blockquote {
-  @apply border-l-4 border-primary/40 pl-4 italic text-muted-foreground;
-}
-
-.prose h3, .prose h4 {
-  @apply font-semibold mt-6 mb-2;
+  @apply border-l-2 border-border pl-4 italic text-muted-foreground;
 }
 
 /* ===========================================
@@ -522,7 +574,7 @@
 }
 
 [dir="rtl"] .prose blockquote {
-  @apply border-l-0 border-r-4 pl-0 pr-4;
+  @apply border-l-0 border-r-2 pl-0 pr-4;
 }
 
 /* ===========================================
@@ -533,150 +585,74 @@
   font-variant-numeric: tabular-nums;
 }
 
-.gradient-text {
-  @apply bg-clip-text text-transparent;
-  background-image: linear-gradient(135deg, hsl(var(--primary)) 0%, hsl(var(--accent)) 100%);
+.truncate-2 {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 
-.hover-lift {
-  @apply transition-transform duration-300;
+.truncate-3 {
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 
-.hover-lift:hover {
-  @apply -translate-y-1;
+/* Hover states */
+.hover-card {
+  @apply transition-all duration-200;
 }
 
-/* Truncate with fade */
-.truncate-fade {
-  @apply relative overflow-hidden;
-  -webkit-mask-image: linear-gradient(to right, black 80%, transparent);
-  mask-image: linear-gradient(to right, black 80%, transparent);
+.hover-card:hover {
+  @apply border-primary/30 shadow-sm;
 }
 
-/* Status pulse */
-.status-pulse {
-  @apply relative;
+/* Interactive list items */
+.interactive-list-item {
+  @apply flex items-center gap-3 p-3 rounded-lg border border-transparent transition-all cursor-pointer;
+  @apply hover:bg-muted/50 hover:border-border;
 }
 
-.status-pulse::before {
-  content: '';
-  @apply absolute inset-0 rounded-full animate-ping opacity-40;
-  background: inherit;
-}
-
-/* Skeleton loading */
-.skeleton {
-  @apply bg-muted rounded animate-pulse;
+.interactive-list-item.active {
+  @apply bg-primary/5 border-primary/20;
 }
 
 /* ===========================================
-   Hallucination Watchdog Styles
+   Page Layouts
    =========================================== */
 
-.watchdog-alert {
-  @apply relative overflow-hidden;
+.page-header {
+  @apply flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6;
 }
 
-.watchdog-alert::before {
-  content: '';
-  @apply absolute top-0 left-0 right-0 h-1;
-  background: linear-gradient(90deg, 
-    hsl(var(--warning)) 0%, 
-    hsl(0 72% 51%) 50%,
-    hsl(var(--warning)) 100%
-  );
+.page-title {
+  @apply text-2xl font-bold tracking-tight;
 }
 
-.watchdog-clean {
-  @apply relative overflow-hidden;
+.page-description {
+  @apply text-muted-foreground mt-1;
 }
 
-.watchdog-clean::before {
-  content: '';
-  @apply absolute top-0 left-0 right-0 h-1;
-  background: linear-gradient(90deg, 
-    hsl(var(--success)) 0%, 
-    hsl(188 78% 41%) 50%,
-    hsl(var(--success)) 100%
-  );
+/* Content grid */
+.content-grid {
+  @apply grid gap-6;
 }
 
-/* ===========================================
-   Schema Fix Code Block
-   =========================================== */
-
-.schema-code {
-  @apply relative font-mono text-sm;
+.content-grid-2 {
+  @apply grid md:grid-cols-2 gap-6;
 }
 
-.schema-code pre {
-  @apply bg-[#1e293b] text-[#e2e8f0] rounded-xl p-4 overflow-x-auto;
-  tab-size: 2;
+.content-grid-3 {
+  @apply grid md:grid-cols-3 gap-6;
 }
 
-.schema-code .copy-btn {
-  @apply absolute top-3 right-3;
+.content-grid-4 {
+  @apply grid md:grid-cols-2 lg:grid-cols-4 gap-6;
 }
 
 /* ===========================================
-   Journey Visualization
-   =========================================== */
-
-.journey-turn {
-  @apply relative pl-8;
-}
-
-.journey-turn::before {
-  content: '';
-  @apply absolute left-3 top-8 bottom-0 w-0.5 bg-border;
-}
-
-.journey-turn:last-child::before {
-  @apply hidden;
-}
-
-.journey-turn-marker {
-  @apply absolute left-0 top-1.5 w-7 h-7 rounded-full border-2 flex items-center justify-center text-xs font-bold;
-}
-
-.journey-mentioned .journey-turn-marker {
-  background-color: hsl(var(--success) / 0.2);
-  border-color: hsl(var(--success));
-  color: hsl(var(--success));
-}
-
-.journey-filtered .journey-turn-marker {
-  background-color: hsl(var(--destructive) / 0.2);
-  border-color: hsl(var(--destructive));
-  color: hsl(var(--destructive));
-}
-
-/* ===========================================
-   Entity Confidence Meter
-   =========================================== */
-
-.entity-meter {
-  @apply relative h-2 rounded-full bg-muted overflow-hidden;
-}
-
-.entity-meter-fill {
-  @apply absolute inset-y-0 left-0 rounded-full transition-all duration-500;
-}
-
-.entity-recognized .entity-meter-fill {
-  background: linear-gradient(90deg, hsl(var(--success)), hsl(188 78% 41%));
-}
-
-.entity-partial .entity-meter-fill {
-  background: linear-gradient(90deg, hsl(var(--warning)), hsl(38 92% 40%));
-}
-
-.entity-unknown .entity-meter-fill {
-  background: linear-gradient(90deg, hsl(var(--muted-foreground)), hsl(var(--muted-foreground)));
-}
-
-/* ===========================================
-   Custom Scrollbar Utilities
+   Scrollbar Utilities
    =========================================== */
 
 @layer utilities {
@@ -686,8 +662,8 @@
   }
   
   .scrollbar-thin::-webkit-scrollbar {
-    width: 6px;
-    height: 6px;
+    width: 4px;
+    height: 4px;
   }
   
   .scrollbar-thin::-webkit-scrollbar-track {
@@ -701,14 +677,23 @@
   }
   
   .scrollbar-thin::-webkit-scrollbar-thumb:hover {
-    background: hsl(var(--muted-foreground) / 0.5);
+    background: hsl(var(--muted-foreground) / 0.4);
   }
-  
-  .scrollbar-thumb-border {
-    scrollbar-color: hsl(var(--border)) transparent;
-  }
-  
-  .scrollbar-track-transparent {
-    scrollbar-color: hsl(var(--border)) transparent;
-  }
+}
+
+/* ===========================================
+   Region Comparison Colors
+   =========================================== */
+
+.region-color-1 { --region-color: 221 83% 53%; }
+.region-color-2 { --region-color: 173 80% 40%; }
+.region-color-3 { --region-color: 262 52% 47%; }
+.region-color-4 { --region-color: 38 92% 50%; }
+.region-color-5 { --region-color: 142 71% 45%; }
+.region-color-6 { --region-color: 0 84% 60%; }
+
+.region-badge {
+  @apply inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-xs font-medium;
+  background: hsl(var(--region-color) / 0.1);
+  color: hsl(var(--region-color));
 }

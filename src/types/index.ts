@@ -102,7 +102,10 @@ export interface SentimentAnalysis {
   key_phrases: SentimentPhrase[];
   concerns: string[]; // Negative aspects mentioned
   praises: string[]; // Positive aspects mentioned
+  context_quality?: string; // Overall context quality assessment
   net_sentiment_score: number; // Normalized 0-100 for UI
+  /** Optional provider usage metadata (tokens, etc.) */
+  llm_usage?: unknown;
 }
 
 export interface SentimentPhrase {
@@ -291,6 +294,9 @@ export interface Prompt {
   last_checked_at: string | null;
   created_at: string;
   updated_at: string;
+  // Analysis configuration
+  is_active: boolean; // Whether included in scheduled analysis runs
+  analysis_regions: SupportedRegion[]; // Regions to analyze this prompt for
 }
 
 // Alias for backwards compatibility with DB schema (keywords table)
@@ -329,6 +335,13 @@ export interface Simulation {
   is_visible: boolean;
   sentiment: Sentiment | null;
   selection_signals: SelectionSignals;
+  /** Stage string for realtime UI (e.g., "simulating:gemini", "enriching", "completed") */
+  analysis_stage?: string | null;
+  /** Async enrichment lifecycle */
+  enrichment_status?: "pending" | "queued" | "processing" | "completed" | "failed";
+  enrichment_started_at?: string | null;
+  enrichment_completed_at?: string | null;
+  enrichment_error?: string | null;
   created_at: string;
   // Alias for backwards compatibility with DB schema
   keyword_id?: string;
@@ -365,12 +378,38 @@ export interface SelectionSignals {
   // RPA-specific fields
   analysis_partial?: boolean; // True if analysis was limited due to short response
   response_length?: number; // Length of extracted response for debugging
+  /** Optional provider usage metadata (tokens, etc.) */
+  llm_usage?: unknown;
+  /** Optional analysis metadata (engine/provider/model/mode) */
+  meta?: {
+    engine?: SupportedEngine;
+    provider?: string;
+    model?: string;
+    simulation_mode?: SimulationMode;
+  };
+  /** Pipeline versions + visibility contract metadata */
+  simulation_pipeline_version?: string;
+  enrichment_pipeline_version?: string;
+  visibility_contract_version?: string;
+  visibility?: {
+    visible_in_text: boolean;
+    visible_in_sources: boolean;
+    visible_probability: number; // 0..1
+    reason: string;
+  };
   rpa_extraction_stats?: {
     original_html_length: number;
     original_text_length: number;
     processed_html_length: number;
     processed_text_length: number;
   };
+  // Ensemble simulation data (when enabled) - uses forward reference
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  ensemble_data?: Record<string, any>;
+  // Ensemble-derived presence level
+  presence_level?: "definite_present" | "possible_present" | "inconclusive" | "likely_absent";
+  // Ensemble-derived visibility frequency (0-1)
+  visibility_frequency?: number;
 }
 
 // ===========================================
@@ -383,6 +422,8 @@ export interface HallucinationAnalysis {
   accuracy_score: number; // 0-100
   confidence: "high" | "medium" | "low";
   analysis_notes: string[];
+  /** Optional provider usage metadata (tokens, etc.) */
+  llm_usage?: unknown;
 }
 
 export interface DetectedHallucination {
@@ -423,6 +464,8 @@ export interface AEOScore {
   breakdown: AEOScoreBreakdown;
   penalties: AEOPenalties;
   analysis_notes: string[];
+  /** Optional provider usage metadata (tokens, etc.) */
+  llm_usage?: unknown;
 }
 
 export interface AEOScoreBreakdown {
@@ -727,6 +770,17 @@ export interface RunAnalysisInput {
   simulation_mode?: SimulationMode;
   /** Use authenticated sessions for browser mode */
   use_authenticated_sessions?: boolean;
+  /** 
+   * Number of ensemble runs per simulation (1-15).
+   * Higher = more accurate brand presence detection but slower/more expensive.
+   * Default: 5 (from ENSEMBLE_RUN_COUNT env var)
+   */
+  ensemble_run_count?: number;
+  /**
+   * Enable detailed variance metrics in results.
+   * Includes confidence intervals and statistical significance.
+   */
+  enable_variance_metrics?: boolean;
 }
 
 // ===========================================
@@ -796,6 +850,8 @@ export interface BrowserCaptureData {
 export interface CheckVisibilityInput {
   brand_id: string;
   prompt_id: string;
+  /** Optional prompt text to avoid per-simulation DB fetch */
+  prompt_text?: string;
   analysis_batch_id: string;
   engine: SupportedEngine;
   language: SupportedLanguage;
@@ -807,6 +863,17 @@ export interface CheckVisibilityInput {
   simulation_mode?: SimulationMode;
   /** Use authenticated sessions for browser mode */
   use_authenticated_sessions?: boolean;
+  /** 
+   * Number of ensemble runs per simulation (1-15).
+   * Higher = more accurate brand presence detection but slower/more expensive.
+   * Default: 5 (from ENSEMBLE_RUN_COUNT env var)
+   */
+  ensemble_run_count?: number;
+  /**
+   * Enable detailed variance metrics in results.
+   * Includes confidence intervals and statistical significance.
+   */
+  enable_variance_metrics?: boolean;
   // Alias for backwards compatibility
   keyword_id?: string;
 }
@@ -965,6 +1032,76 @@ export function getEngineInfo(engine: SupportedEngine): EngineInfo {
 }
 
 // ===========================================
+// Cross-Engine Visibility Analysis
+// ===========================================
+
+/**
+ * Aggregated visibility analysis across all AI engines.
+ * Provides consensus-based confidence for brand visibility.
+ */
+export interface CrossEngineVisibility {
+  /** Overall confidence based on cross-engine agreement */
+  overall_confidence: "high" | "medium" | "low";
+  /** Engines where the brand was visible */
+  engines_visible: SupportedEngine[];
+  /** Engines where the brand was absent */
+  engines_absent: SupportedEngine[];
+  /** True if brand is visible in ≥3/4 engines */
+  consensus_visibility: boolean;
+  /** 0-1 score indicating how much engines disagree (0 = unanimous, 1 = split) */
+  disagreement_score: number;
+  /** Per-engine visibility details */
+  engine_details: Record<SupportedEngine, {
+    is_visible: boolean;
+    confidence: "high" | "medium" | "low";
+    visibility_frequency?: number;
+    source_count: number;
+    mention_count: number;
+  }>;
+}
+
+// ===========================================
+// Statistical Confidence Types
+// ===========================================
+
+/**
+ * Wilson score confidence interval for frequency data.
+ * More accurate than simple percentage for small sample sizes.
+ */
+export interface ConfidenceInterval {
+  /** Observed frequency (0-1) */
+  frequency: number;
+  /** Lower bound of confidence interval */
+  lower_bound: number;
+  /** Upper bound of confidence interval */
+  upper_bound: number;
+  /** Confidence level (e.g., 0.95 for 95%) */
+  confidence_level: number;
+  /** Sample size used for calculation */
+  sample_size: number;
+}
+
+/**
+ * Variance metrics for ensemble simulation results.
+ */
+export interface EnsembleVarianceMetrics {
+  /** Number of ensemble runs performed */
+  run_count: number;
+  /** Number of successful runs */
+  successful_runs: number;
+  /** Brand detection variance (0-1) */
+  brand_variance: number;
+  /** Confidence interval for visibility frequency */
+  confidence_interval?: ConfidenceInterval;
+  /** Whether the result is statistically significant */
+  statistical_significance: boolean;
+  /** P-value for null hypothesis (brand is absent) */
+  p_value?: number;
+  /** Standard error of the frequency estimate */
+  standard_error?: number;
+}
+
+// ===========================================
 // Ensemble Simulation Types
 // ===========================================
 
@@ -1020,6 +1157,7 @@ export interface EnsembleSimulationData {
   
   // Variance metrics
   brand_variance: number;         // 0-1, how consistent brands are across runs
+  variance_metrics?: EnsembleVarianceMetrics;  // Extended variance metrics
   
   // Notes and warnings
   notes: string[];
@@ -1070,4 +1208,3 @@ export const PRESENCE_LEVEL_COLORS: Record<BrandPresenceLevel, string> = {
   'inconclusive': 'bg-orange-500/20 text-orange-400 border-orange-500/30',
   'likely_absent': 'bg-red-500/20 text-red-400 border-red-500/30',
 };
-

@@ -19,6 +19,9 @@
 
 import OpenAI from "openai";
 import { OPENAI_CHAT_MODEL } from "@/lib/ai/openai-config";
+import { UNTRUSTED_CONTENT_POLICY, JSON_ONLY_POLICY } from "@/lib/ai/prompt-policies";
+import { callOpenAIResponses } from "@/lib/ai/llm-runtime";
+import { LLM_TIMEOUTS_MS } from "@/lib/ai/openai-timeouts";
 import type {
   SelectionSignals,
   SearchContext,
@@ -193,7 +196,14 @@ ${GEO_FRAMEWORK}
 4. **Consider query intent** when prioritizing recommendations
 5. **Include specific steps** for each action item
 
-Return your analysis as valid JSON only.`;
+CRITICAL OUTPUT RULES (MUST FOLLOW):
+- Output MUST be strict RFC 8259 JSON (no trailing commas, no comments).
+- Output ONLY JSON (no markdown fences, no prose).
+- Use double quotes for all strings.
+- Keep the output concise (this powers a fast dashboard).
+- Keep every string short; do NOT write long paragraphs.`;
+ 
+  const hardenedSystemPrompt = `${UNTRUSTED_CONTENT_POLICY}\n\n${systemPrompt}\n\n${JSON_ONLY_POLICY}`;
 
   // Handle empty or very short responses
   const cleanedHtml = answer_html?.trim() || "";
@@ -323,43 +333,43 @@ ${winningSourcesContext}
 
 ---
 
-Return a JSON object with this EXACT structure:
+Return a JSON object with this EXACT structure (example below is VALID JSON):
 {
-  "is_visible": boolean,
-  "sentiment": "positive" | "neutral" | "negative",
-  "winning_sources": ["url1", "url2"],
+  "is_visible": false,
+  "sentiment": "neutral",
+  "winning_sources": ["https://example.com/source-1", "https://example.com/source-2"],
   "gap_analysis": {
-    "structure_score": 1-5,
-    "data_density_score": 1-5,
-    "directness_score": 1-5,
-    "authority_score": 1-5,
-    "crawlability_score": 1-5
+    "structure_score": 3,
+    "data_density_score": 3,
+    "directness_score": 3,
+    "authority_score": 3,
+    "crawlability_score": 3
   },
   "action_items": [
     {
-      "priority": "high" | "medium" | "foundational" | "nice-to-have",
-      "category": "third-party" | "entity-pages" | "brand-consistency" | "qa-content" | "proof-content" | "technical" | "schema" | "measurement" | "local",
-      "title": "Short action title (max 10 words)",
-      "description": "Detailed explanation of what to do and why",
-      "specific_steps": ["Step 1", "Step 2", "Step 3"]
+      "priority": "high",
+      "category": "third-party",
+      "title": "Get listed in comparison pages",
+      "description": "Create a partner page and pitch top-ranking comparison sites that the AI uses as sources.",
+      "steps": ["Identify 5 ranking sources", "Create a partner page", "Pitch editors with proof and pricing"]
     }
   ],
-  "competitor_insights": "What are the winning sources doing that ${brand_domain} is not? Be specific about their content strategy.",
-  "quick_wins": ["3 highest-impact things that can be done THIS WEEK"],
-  "recommendation_summary": "2-3 sentence executive summary focusing on the #1 gap"
+  "competitor_insights": "Short, specific insight referencing the winning sources.",
+  "quick_wins": ["One quick win", "Second quick win", "Third quick win"],
+  "recommendation_summary": "2-3 sentence executive summary."
 }
 
 IMPORTANT RULES:
-- Provide 5-10 action items across different priority levels and categories
-- At least 2 items should be "high" priority (third-party or entity-pages)
-- Include at least 1 "foundational" item (technical or schema)
+- Provide 3-6 action items (max 6) across different priority levels and categories
+- At least 1 item should be "high" priority (third-party or entity-pages) when brand is not visible
+- Include at least 1 "foundational" item (technical or schema) when applicable
 - Be extremely specific - mention actual page types, schema types, specific content to create
 - Reference the actual winning sources and explain what they did better
 - For comparison queries, emphasize getting included in third-party lists
 - If brand is NOT in search results, prioritize third-party visibility over on-site changes`;
 
   // Retry logic for API resilience
-  const maxRetries = 3;
+  const maxRetries = 2;
   let lastError: Error | null = null;
   let emptyRetries = 0;
 
@@ -368,48 +378,103 @@ IMPORTANT RULES:
   console.log(`[SelectionSignals] Input: ${clippedResponse.length} chars (sanitized), search results: ${search_context?.results?.length || 0}`);
   
   // Use a known working model, with fallback
-  const modelToUse = OPENAI_CHAT_MODEL || "gpt-4o-mini";
+  const modelToUse = OPENAI_CHAT_MODEL || "gpt-5-nano";
   console.log(`[SelectionSignals] Using model: ${modelToUse}`);
 
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     try {
       console.log(`[SelectionSignals] Attempt ${attempt}/${maxRetries} - Calling OpenAI (${modelToUse})...`);
       
-      const response = await openai.chat.completions.create({
+      // Use Responses API + json_schema to guarantee parseable JSON.
+      const { response, usage } = await callOpenAIResponses({
+        client: openai,
+        provider: "openai",
         model: modelToUse,
-        messages: [
-          { role: "system", content: systemPrompt },
+        timeoutMs: LLM_TIMEOUTS_MS.selectionSignals,
+        request: {
+        model: modelToUse,
+        input: [
+          { role: "system", content: hardenedSystemPrompt },
           { role: "user", content: userPrompt },
         ],
-        response_format: { type: "json_object" },
-        max_completion_tokens: 3000,
+        reasoning: { effort: "low" },
+        text: {
+          verbosity: "low",
+          format: {
+            type: "json_schema",
+            name: "selection_signals",
+            strict: true,
+            schema: {
+              type: "object",
+              additionalProperties: false,
+              required: [
+                "is_visible",
+                "sentiment",
+                "winning_sources",
+                "gap_analysis",
+                "action_items",
+                "competitor_insights",
+                "quick_wins",
+                "recommendation_summary",
+              ],
+              properties: {
+                is_visible: { type: "boolean" },
+                sentiment: { type: "string", enum: ["positive", "neutral", "negative"] },
+                winning_sources: { type: "array", maxItems: 5, items: { type: "string", maxLength: 220 } },
+                gap_analysis: {
+                  type: "object",
+                  additionalProperties: false,
+                  required: [
+                    "structure_score",
+                    "data_density_score",
+                    "directness_score",
+                    "authority_score",
+                    "crawlability_score",
+                  ],
+                  properties: {
+                    structure_score: { type: "integer", minimum: 1, maximum: 5 },
+                    data_density_score: { type: "integer", minimum: 1, maximum: 5 },
+                    directness_score: { type: "integer", minimum: 1, maximum: 5 },
+                    authority_score: { type: "integer", minimum: 1, maximum: 5 },
+                    crawlability_score: { type: "integer", minimum: 1, maximum: 5 },
+                  },
+                },
+                action_items: {
+                  type: "array",
+                  maxItems: 4,
+                  items: {
+                    type: "object",
+                    additionalProperties: false,
+                    required: ["priority", "category", "title", "description", "steps"],
+                    properties: {
+                      priority: { type: "string", enum: ["high", "medium", "foundational", "nice-to-have"] },
+                      category: { type: "string", enum: ["technical", "content", "third-party", "entity", "measurement", "local", "ymyl"] },
+                      title: { type: "string", maxLength: 80 },
+                      description: { type: "string", maxLength: 320 },
+                      steps: { type: "array", maxItems: 4, items: { type: "string", maxLength: 140 } },
+                    },
+                  },
+                },
+                competitor_insights: { type: "string", maxLength: 600 },
+                quick_wins: { type: "array", items: { type: "string", maxLength: 140 }, maxItems: 3 },
+                recommendation_summary: { type: "string", maxLength: 320 },
+              },
+            },
+          },
+        },
+        // IMPORTANT: must be high enough to allow the model to close the JSON object.
+        max_output_tokens: 1500,
+        } as unknown as Parameters<typeof openai.responses.create>[0],
       });
 
-      // Enhanced debugging - check full response structure
-      const choice = response.choices[0];
-      const content = choice?.message?.content;
-      const finishReason = choice?.finish_reason;
-      const refusal = choice?.message?.refusal;
-      
-      console.log(`[SelectionSignals] Response: finish_reason=${finishReason}, content_length=${content?.length || 0}, refusal=${refusal || 'none'}`);
-      
-      // Check for refusal (content policy)
-      if (refusal) {
-        console.warn(`[SelectionSignals] OpenAI refused the request: ${refusal}`);
-        lastError = new Error(`OpenAI refused: ${refusal}`);
-        break; // Don't retry refusals
-      }
-      
-      // Check for content filter or other stop reasons
-      if (finishReason === 'content_filter') {
-        console.warn(`[SelectionSignals] Content was filtered by OpenAI`);
-        lastError = new Error('Content filtered by OpenAI');
-        break; // Don't retry content filter
-      }
+      const responseObj = response as unknown as { output_text?: unknown };
+      const content = typeof responseObj.output_text === "string" ? responseObj.output_text : "";
+
+      console.log(`[SelectionSignals] Response: content_length=${content.length}`);
       
       if (!content || content.trim() === "") {
         emptyRetries++;
-        console.warn(`[SelectionSignals] Attempt ${attempt} returned empty content (finish_reason: ${finishReason})`);
+        console.warn(`[SelectionSignals] Attempt ${attempt} returned empty content`);
         
         if (attempt < maxRetries) {
           await new Promise(resolve => setTimeout(resolve, 1000 * attempt));
@@ -443,6 +508,7 @@ IMPORTANT RULES:
       competitor_insights: String(parsed.competitor_insights || ""),
       quick_wins: Array.isArray(parsed.quick_wins) ? parsed.quick_wins : [],
       recommendation: String(parsed.recommendation_summary || parsed.recommendation || "No recommendation available"),
+      llm_usage: usage,
     };
     } catch (error) {
       lastError = error instanceof Error ? error : new Error(String(error));
@@ -645,8 +711,71 @@ function isLikelyBrandContext(text: string, term: string, position: number): boo
 }
 
 /**
+ * Generate brand name variations including with/without spaces
+ * Examples: "city solar" -> ["city solar", "citysolar", "city-solar"]
+ *           "citysolar" -> ["citysolar", "city solar"] (if looks like compound word)
+ */
+function generateBrandVariations(brandName: string): string[] {
+  const variations = new Set<string>([brandName.toLowerCase()]);
+  const nameLower = brandName.toLowerCase().trim();
+  
+  // 1. If brand has spaces, create no-space and hyphenated versions
+  if (nameLower.includes(' ')) {
+    variations.add(nameLower.replace(/\s+/g, '')); // "city solar" -> "citysolar"
+    variations.add(nameLower.replace(/\s+/g, '-')); // "city solar" -> "city-solar"
+    variations.add(nameLower.replace(/\s+/g, '_')); // "city solar" -> "city_solar"
+  }
+  
+  // 2. If brand has NO spaces but looks like compound word (camelCase or all lowercase with common patterns)
+  // Try to split it into words
+  if (!nameLower.includes(' ') && nameLower.length > 4) {
+    // Try camelCase splitting: "CitySolar" -> "city solar"
+    const camelSplit = brandName.replace(/([a-z])([A-Z])/g, '$1 $2').toLowerCase();
+    if (camelSplit !== nameLower) {
+      variations.add(camelSplit);
+    }
+    
+    // Try common word boundary patterns for compound words
+    // Common prefixes/suffixes that might indicate word boundaries
+    const commonWords = ['solar', 'tech', 'soft', 'digital', 'media', 'web', 'app', 'smart', 'pro', 'hub', 
+                         'city', 'home', 'life', 'care', 'health', 'finance', 'pay', 'shop', 'buy', 'sell',
+                         'global', 'world', 'net', 'link', 'connect', 'cloud', 'data', 'info', 'systems'];
+    
+    for (const word of commonWords) {
+      // Check if brand starts with common word
+      if (nameLower.startsWith(word) && nameLower.length > word.length + 2) {
+        const remainder = nameLower.slice(word.length);
+        variations.add(`${word} ${remainder}`);
+        variations.add(`${word}-${remainder}`);
+      }
+      // Check if brand ends with common word
+      if (nameLower.endsWith(word) && nameLower.length > word.length + 2) {
+        const prefix = nameLower.slice(0, -word.length);
+        variations.add(`${prefix} ${word}`);
+        variations.add(`${prefix}-${word}`);
+      }
+    }
+  }
+  
+  // 3. If brand has hyphens, create space and no-space versions
+  if (nameLower.includes('-')) {
+    variations.add(nameLower.replace(/-/g, ' ')); // "city-solar" -> "city solar"
+    variations.add(nameLower.replace(/-/g, '')); // "city-solar" -> "citysolar"
+  }
+  
+  // 4. If brand has underscores, create space and no-space versions
+  if (nameLower.includes('_')) {
+    variations.add(nameLower.replace(/_/g, ' ')); // "city_solar" -> "city solar"
+    variations.add(nameLower.replace(/_/g, '')); // "city_solar" -> "citysolar"
+  }
+  
+  return Array.from(variations).filter(v => v.length >= 3);
+}
+
+/**
  * More thorough visibility check that also considers context
  * ENHANCED: Now smarter about generic brand names to avoid false positives
+ * ENHANCED: Now checks brand name variations with/without spaces
  */
 export function thoroughVisibilityCheck(
   response: string,
@@ -704,12 +833,22 @@ export function thoroughVisibilityCheck(
   if (brandName && brandName.length > 2) {
     const isGeneric = isGenericBrandName(brandName);
     
+    // ENHANCED: Generate all variations of the brand name (with/without spaces, hyphens, etc.)
+    const brandVariations = generateBrandVariations(brandName);
+    
     // For generic brand names, require full name match OR context-aware partial match
     if (isGeneric) {
-      // First try exact full brand name match (always valid)
-      if (checkMention(responseLower, brandName) || checkMention(rawResponseLower, brandName)) {
-        mentions.push(brandName);
-      } else {
+      // First try exact full brand name match and all variations
+      let foundMatch = false;
+      for (const variation of brandVariations) {
+        if (checkMention(responseLower, variation) || checkMention(rawResponseLower, variation)) {
+          mentions.push(variation);
+          foundMatch = true;
+          break; // Found at least one match
+        }
+      }
+      
+      if (!foundMatch) {
         // For generic brands, check if the distinctive part appears with brand context
         const distinctivePart = getDistinctivePart(brandName);
         if (distinctivePart && distinctivePart.length > 3) {
@@ -720,29 +859,27 @@ export function thoroughVisibilityCheck(
         }
       }
     } else {
-      // Non-generic brand names: standard matching
-      if (checkMention(responseLower, brandName) || checkMention(rawResponseLower, brandName)) {
-        mentions.push(brandName);
+      // Non-generic brand names: check all variations
+      for (const variation of brandVariations) {
+        if (checkMention(responseLower, variation) || checkMention(rawResponseLower, variation)) {
+          if (!mentions.includes(variation)) {
+            mentions.push(variation);
+            break; // Found a match, no need to continue
+          }
+        }
       }
       
       // Check for brand name without common words (for real estate, etc.)
       const simplifiedName = brandName.replace(/properties|realty|real estate|group|holdings|development|developers|company|inc\.?|llc|ltd\.?/gi, '').trim();
-      if (simplifiedName.length > 2 && !mentions.includes(simplifiedName)) {
-        if (checkMention(responseLower, simplifiedName) || checkMention(rawResponseLower, simplifiedName)) {
-          mentions.push(simplifiedName);
-        }
-      }
-      
-      // Check for brand name with common typos/variations
-      const variations = [
-        brandName.replace(/\s+/g, ''), // No spaces
-        brandName.replace(/\s+/g, '-'), // Hyphenated
-        brandName.replace(/\s+/g, '_'), // Underscored
-      ];
-      for (const variation of variations) {
-        if (variation !== brandName && variation.length > 2) {
+      if (simplifiedName.length > 2 && !mentions.some(m => m.toLowerCase() === simplifiedName.toLowerCase())) {
+        // Also check variations of the simplified name
+        const simplifiedVariations = generateBrandVariations(simplifiedName);
+        for (const variation of simplifiedVariations) {
           if (checkMention(responseLower, variation) || checkMention(rawResponseLower, variation)) {
-            if (!mentions.includes(variation)) mentions.push(variation);
+            if (!mentions.includes(variation)) {
+              mentions.push(variation);
+              break;
+            }
           }
         }
       }
@@ -766,14 +903,24 @@ export function thoroughVisibilityCheck(
   }
   
   // Check aliases - these are user-defined so we trust them more
+  // ENHANCED: Also check variations of aliases (with/without spaces)
   for (const alias of brandAliases) {
     if (alias.length > 2) {
       // Skip single generic words as aliases
       if (alias.split(/\s+/).length === 1 && GENERIC_WORDS.has(alias.toLowerCase())) {
         continue;
       }
-      if (checkMention(responseLower, alias) || checkMention(rawResponseLower, alias)) {
-        if (!mentions.includes(alias)) mentions.push(alias);
+      
+      // Generate variations for this alias
+      const aliasVariations = generateBrandVariations(alias);
+      
+      for (const variation of aliasVariations) {
+        if (checkMention(responseLower, variation) || checkMention(rawResponseLower, variation)) {
+          if (!mentions.includes(variation) && !mentions.includes(alias)) {
+            mentions.push(alias); // Store original alias, not variation
+            break;
+          }
+        }
       }
     }
   }
@@ -824,16 +971,44 @@ function parseJsonFromContent(content: string): unknown {
     .replace(/```$/, "")
     .trim();
 
-  try {
-    return JSON.parse(unfenced);
-  } catch {
-    const start = unfenced.indexOf("{");
-    const end = unfenced.lastIndexOf("}");
-    if (start >= 0 && end > start) {
-      return JSON.parse(unfenced.slice(start, end + 1));
-    }
-    throw new Error("Invalid JSON returned from selection analysis.");
+  const candidates: string[] = [unfenced];
+
+  const startObj = unfenced.indexOf("{");
+  const endObj = unfenced.lastIndexOf("}");
+  if (startObj >= 0 && endObj > startObj) {
+    candidates.push(unfenced.slice(startObj, endObj + 1));
   }
+
+  const tryParse = (s: string): unknown => JSON.parse(s);
+
+  // 1) Strict parse attempts
+  for (const c of candidates) {
+    try {
+      return tryParse(c);
+    } catch {
+      // keep trying
+    }
+  }
+
+  // 2) Common repairs (trailing commas, smart quotes)
+  for (const c of candidates) {
+    const repaired = c
+      // Normalize smart quotes
+      .replace(/[\u201C\u201D]/g, '"')
+      .replace(/[\u2018\u2019]/g, "'")
+      // Remove trailing commas before } or ]
+      .replace(/,\s*([}\]])/g, "$1");
+
+    try {
+      return tryParse(repaired);
+    } catch {
+      // keep trying
+    }
+  }
+
+  // 3) Give a helpful error for debugging (truncate to avoid log spam)
+  const snippet = unfenced.slice(0, 400);
+  throw new Error(`Invalid JSON returned from selection analysis. Snippet: ${snippet}`);
 }
 
 /**
@@ -847,8 +1022,8 @@ function validateActionItems(items: unknown): SelectionSignals["action_items"] {
     category: validateCategory(item?.category),
     title: String(item?.title || "Action item"),
     description: String(item?.description || ""),
-    steps: Array.isArray(item?.steps) 
-      ? item.steps.map(String) 
+    steps: Array.isArray(item?.steps)
+      ? item.steps.map(String)
       : Array.isArray(item?.specific_steps)
         ? item.specific_steps.map(String)
         : [],

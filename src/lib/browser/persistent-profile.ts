@@ -10,7 +10,7 @@
  * This allows manual verification once, then automated reuse.
  */
 
-import { chromium, type BrowserContext, type Page } from 'playwright';
+import type { BrowserContext, Page } from "playwright";
 import * as fs from 'fs';
 import * as path from 'path';
 import { SupportedEngine } from '@/types';
@@ -100,6 +100,8 @@ export async function launchWithPersistentProfile(
   } = {}
 ): Promise<{ browser: BrowserContext; context: BrowserContext; page: Page }> {
   const userDataDir = getProfileDir(engine);
+  // Lazy import Playwright to avoid slow worker startup when browser automation isn't used.
+  const { chromium } = await import("playwright");
   
   // Note: launchPersistentContext returns a BrowserContext (not Browser)
   const context = await chromium.launchPersistentContext(userDataDir, {

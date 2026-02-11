@@ -1,11 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { tasks } from "@trigger.dev/sdk/v3";
-import type { RunAnalysisInput, SupportedEngine, SupportedLanguage, SupportedRegion } from "@/types";
+import type { RunAnalysisInput, SupportedEngine } from "@/types";
 import { isRpaAvailable } from "@/lib/rpa/status";
+import { AnalysisRunBodySchema } from "@/lib/schemas/api";
+import { createRequestId, withLogContext } from "@/lib/logging/logger";
 
 export async function POST(request: NextRequest) {
   try {
+    const request_id = request.headers.get("x-request-id") || createRequestId();
+    const logger = withLogContext({ request_id, route: "analysis/run" });
     const supabase = await createClient();
 
     // Check authentication
@@ -30,34 +34,47 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    // Get request body
-    const body = await request.json();
-    const { 
-      brand_id, 
+    // Get + validate request body
+    const bodyJson = await request.json();
+    const parsed = AnalysisRunBodySchema.safeParse(bodyJson);
+    if (!parsed.success) {
+      return NextResponse.json(
+        { error: "Invalid request", issues: parsed.error.issues.map((i) => ({ path: i.path, message: i.message })) },
+        { status: 400 }
+      );
+    }
+
+    const {
+      brand_id,
       keyword_set_id, // Legacy support
-      prompt_set_id,  // New name
-      prompt_ids,     // For individual prompts (no set required)
-      engines, 
-      language,
-      region = "global", // Default to global if not specified
+      prompt_set_id, // New name
+      prompt_ids, // For individual prompts (no set required)
+      engines,
+      language: providedLanguage,
+      region,
       enable_hallucination_watchdog,
       simulation_mode, // Optional: 'api' to force API mode for ChatGPT
       schedule, // New: schedule frequency for recurring analysis
-    } = body as {
-      brand_id: string;
-      keyword_set_id?: string;
-      prompt_set_id?: string;
-      prompt_ids?: string[];
-      engines: SupportedEngine[];
-      language: SupportedLanguage;
-      region?: SupportedRegion;
-      enable_hallucination_watchdog?: boolean;
-      simulation_mode?: 'api' | 'rpa' | 'hybrid';
-      schedule?: 'daily' | 'weekly' | 'biweekly' | 'monthly';
-    };
+      ensemble_run_count, // Number of ensemble runs (1-15, default 3)
+      enable_variance_metrics, // Whether to include statistical metrics
+    } = parsed.data;
+    
+    // Auto-detect language if not provided
+    // Will be updated later based on prompt text analysis
+    let language = providedLanguage || "en";
     
     // Log what we received
-    console.log(`[Analysis API] Request: engines=${engines.join(",")}, hallucination_watchdog=${enable_hallucination_watchdog}, simulation_mode=${simulation_mode}`);
+    logger.info("Request", {
+      brand_id,
+      engines,
+      language,
+      region,
+      enable_hallucination_watchdog: Boolean(enable_hallucination_watchdog),
+      simulation_mode,
+      schedule,
+      ensemble_run_count,
+      enable_variance_metrics,
+    });
     
     // ═══════════════════════════════════════════════════════════════
     // ENGINE ROUTING - RPA is DEFAULT for ChatGPT, API fallback if offline
@@ -77,11 +94,11 @@ export async function POST(request: NextRequest) {
     }
     
     // Log RPA status for debugging
-    console.log(`[Analysis API] RPA Status: available=${rpaStatus.available}, workers=${rpaStatus.workerCount}, engines=[${rpaStatus.engines.join(",")}]`);
+    logger.info("RPA status", { rpaStatus });
     
     // Check if ChatGPT can use RPA: worker must be available AND report chatgpt as ready
     const rpaAvailableForChatGPT = !forceApiMode && rpaStatus.available && rpaStatus.engines.includes('chatgpt');
-    console.log(`[Analysis API] ChatGPT RPA available: ${rpaAvailableForChatGPT} (forceApiMode=${forceApiMode})`);
+    logger.info("Engine routing", { rpaAvailableForChatGPT, forceApiMode });
     
     // Split engines into RPA (ChatGPT if available) and API (others + ChatGPT fallback)
     const rpaEngines: SupportedEngine[] = [];
@@ -92,15 +109,18 @@ export async function POST(request: NextRequest) {
         if (forceApiMode) {
           // User explicitly requested API mode
           apiEngines.push(engine);
-          console.log(`[Analysis API] ChatGPT -> API mode (user requested simulation_mode: api)`);
+          logger.info("ChatGPT routing", { to: "api", reason: "user_requested" });
         } else if (rpaAvailableForChatGPT) {
           // RPA worker is online and ready for ChatGPT - use RPA for best quality
           rpaEngines.push(engine);
-          console.log(`[Analysis API] ChatGPT -> RPA mode (worker ready)`);
+          logger.info("ChatGPT routing", { to: "rpa", reason: "worker_ready" });
         } else {
           // RPA worker offline or not ready - fallback to API mode
           apiEngines.push(engine);
-          console.log(`[Analysis API] ChatGPT -> API mode (fallback: RPA ${rpaStatus.available ? 'not ready for chatgpt' : 'offline'})`);
+          logger.info("ChatGPT routing", {
+            to: "api",
+            reason: rpaStatus.available ? "rpa_not_ready_for_chatgpt" : "rpa_offline",
+          });
         }
       } else {
         // All other engines use API mode
@@ -109,30 +129,24 @@ export async function POST(request: NextRequest) {
     }
     
     // Summary of engine routing
-    console.log(`[Analysis API] Engine routing summary:`);
-    console.log(`  - Requested: ${engines.length} engines [${engines.join(", ")}]`);
-    console.log(`  - RPA engines: ${rpaEngines.length} [${rpaEngines.join(", ") || "none"}]`);
-    console.log(`  - API engines: ${apiEngines.length} [${apiEngines.join(", ") || "none"}]`);
+    logger.info("Engine routing summary", {
+      requested: engines,
+      rpaEngines,
+      apiEngines,
+    });
     
     // Sanity check: all engines should be accounted for
     if (rpaEngines.length + apiEngines.length !== engines.length) {
-      console.error(`[Analysis API] ⚠️ ENGINE ROUTING BUG: ${rpaEngines.length} + ${apiEngines.length} != ${engines.length}`);
+      logger.error("ENGINE ROUTING BUG", { rpaCount: rpaEngines.length, apiCount: apiEngines.length, total: engines.length });
     }
 
     // Use prompt_set_id if provided, fall back to keyword_set_id for backwards compatibility
     const setId = prompt_set_id || keyword_set_id;
 
-    // Validate required fields
-    if (!brand_id || (!setId && (!prompt_ids || prompt_ids.length === 0)) || !engines || !language) {
+    // Additional semantic validation
+    if (!setId && (!prompt_ids || prompt_ids.length === 0)) {
       return NextResponse.json(
-        { error: "Missing required fields. Provide brand_id, engines, language, and either prompt_set_id or prompt_ids" },
-        { status: 400 }
-      );
-    }
-
-    if (!Array.isArray(engines) || engines.length === 0) {
-      return NextResponse.json(
-        { error: "At least one engine must be selected" },
+        { error: "Provide either prompt_set_id/keyword_set_id or prompt_ids" },
         { status: 400 }
       );
     }
@@ -165,6 +179,12 @@ export async function POST(request: NextRequest) {
         { status: 402 }
       );
     }
+
+    // Enforce hallucination detection policy:
+    // - Pro/Agency: always enabled
+    // - Non-pro: always disabled (locked)
+    const orgTier = String(organization.tier || "free").toLowerCase();
+    const effectiveHallucinationWatchdog = orgTier === "pro" || orgTier === "agency";
 
     // Get prompt count to estimate credits needed
     let promptCount = 0;
@@ -240,13 +260,31 @@ export async function POST(request: NextRequest) {
       promptsToProcess = prompts || [];
     }
 
+    // Auto-detect language from prompt text if not provided
+    if (!providedLanguage && promptsToProcess.length > 0) {
+      const combinedText = promptsToProcess.map(p => p.text).join(" ");
+      // Arabic Unicode range detection
+      const arabicRegex = /[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF\uFB50-\uFDFF\uFE70-\uFEFF]/;
+      const arabicChars = (combinedText.match(arabicRegex) || []).length;
+      const totalChars = combinedText.replace(/\s/g, "").length;
+      // If more than 30% Arabic characters, use Arabic
+      if (totalChars > 0 && arabicChars / totalChars > 0.3) {
+        language = "ar";
+        logger.info("Auto-detected language", { language: "ar", arabicRatio: arabicChars / totalChars });
+      }
+    }
+
     // STEP 1: Trigger crawl FIRST if not recently crawled
     // This ensures we have fresh crawl data for recommendations
     const crawlFreshnessHours = 24;
     const groundTruthSummary = brand.ground_truth_summary as { 
       crawl_analysis?: { last_crawled_at?: string } 
     } | null;
-    const lastCrawledAt = groundTruthSummary?.crawl_analysis?.last_crawled_at;
+    // Prefer crawl_analysis timestamp, but fall back to brand.last_crawled_at (more reliable / commonly set)
+    const lastCrawledAt =
+      groundTruthSummary?.crawl_analysis?.last_crawled_at ||
+      (brand as unknown as { last_crawled_at?: string | null }).last_crawled_at ||
+      undefined;
     const needsCrawl = !lastCrawledAt || 
       (Date.now() - new Date(lastCrawledAt).getTime()) > crawlFreshnessHours * 60 * 60 * 1000;
     
@@ -260,7 +298,9 @@ export async function POST(request: NextRequest) {
           .select("id, status")
           .eq("brand_id", brand_id)
           .in("status", ["pending", "crawling"])
-          .single();
+          .order("created_at", { ascending: false })
+          .limit(1)
+          .maybeSingle();
         
         if (!existingCrawl) {
           // Create crawl job
@@ -324,7 +364,7 @@ export async function POST(request: NextRequest) {
             status: "awaiting_rpa",
             selection_signals: {
               hallucination_watchdog: {
-                enabled: enable_hallucination_watchdog || false,
+                enabled: effectiveHallucinationWatchdog,
                 result: null,
               },
             },
@@ -357,8 +397,10 @@ export async function POST(request: NextRequest) {
         engines: apiEngines, // Includes ChatGPT if RPA is offline
         language,
         region,
-        enable_hallucination_watchdog: enable_hallucination_watchdog || false,
+        enable_hallucination_watchdog: effectiveHallucinationWatchdog,
         simulation_mode: 'api', // Always API for these
+        ensemble_run_count: ensemble_run_count || 1,
+        enable_variance_metrics: enable_variance_metrics || false,
       };
 
       try {
@@ -403,7 +445,7 @@ export async function POST(request: NextRequest) {
           engines,
           language,
           region,
-          enable_hallucination_watchdog: enable_hallucination_watchdog || false,
+          enable_hallucination_watchdog: effectiveHallucinationWatchdog,
           frequency: schedule,
           is_active: true,
           last_run_at: now.toISOString(),

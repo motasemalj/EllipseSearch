@@ -51,6 +51,7 @@ import { SentimentAnalysisCard } from "@/components/brands/sentiment-analysis-ca
 import { CitationAuthorityPanel } from "@/components/brands/citation-authority-panel";
 import { SupportedEngine, SelectionSignals, ActionItem, SentimentAnalysis, CitationAuthority, GroundingMetadata, SupportedRegion, getRegionInfo } from "@/types";
 import { textToSafeHtml } from "@/lib/ai/text-to-html";
+import { HighlightedHtml } from "@/components/ui/highlighted-html";
 import { CopyButtonClient } from "@/components/ui/copy-button";
 
 interface PromptPageProps {
@@ -152,17 +153,19 @@ export default async function PromptPage({ params }: PromptPageProps) {
   // Verify brand belongs to organization
   const { data: brand } = await supabase
     .from("brands")
-    .select("name, domain")
+    .select("name, domain, brand_aliases")
     .eq("id", brandId)
     .eq("organization_id", profile.organization_id)
     .single();
 
   if (!brand) notFound();
 
+  const brandAliases = ((brand as unknown as { brand_aliases?: string[] }).brand_aliases || []).filter(Boolean);
+
   // Check if there are any running analyses for this prompt
   const { data: runningBatches } = await supabase
     .from("analysis_batches")
-    .select("id, status, total_simulations, completed_simulations, engines, created_at, started_at")
+    .select("id, status, total_simulations, completed_simulations, engines, created_at, started_at, prompt_id, prompt_set_id")
     .eq("brand_id", brandId)
     .in("status", ["queued", "processing"])
     .order("created_at", { ascending: false });
@@ -183,12 +186,47 @@ export default async function PromptPage({ params }: PromptPageProps) {
   // We need to check if any running batch includes this prompt
   const hasRunningAnalysis = runningBatches && runningBatches.length > 0;
 
-  // If there are no completed simulations AND there's a running analysis, show the "in progress" view
-  if (totalSims === 0 && hasRunningAnalysis) {
-    const currentBatch = runningBatches[0];
-    const progress = currentBatch.total_simulations > 0 
-      ? Math.round((currentBatch.completed_simulations / currentBatch.total_simulations) * 100)
-      : 0;
+  // Pick the running batch that actually corresponds to THIS prompt:
+  // - Single prompt runs: analysis_batches.prompt_id is set.
+  // - Prompt set runs: analysis_batches.prompt_set_id matches this prompt's set.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const promptBatch =
+    (runningBatches || []).find((b: Record<string, unknown>) => b.prompt_id === promptId) ||
+    (prompt.prompt_set_id
+      ? (runningBatches || []).find((b: Record<string, unknown>) => b.prompt_set_id === prompt.prompt_set_id)
+      : undefined);
+
+  // If enrichment_status exists, use it to decide whether the analysis is truly "done" for UI purposes.
+  const hasAnyEnrichmentStatus = allSims.some((s: Record<string, unknown>) => s.enrichment_status != null);
+  const simsForBatch = promptBatch ? allSims.filter((s: Record<string, unknown>) => s.analysis_batch_id === (promptBatch as Record<string, unknown>).id) : allSims;
+  const enrichedDoneCount = hasAnyEnrichmentStatus
+    ? simsForBatch.filter((s: Record<string, unknown>) => s.enrichment_status === "completed" || s.enrichment_status === "failed").length
+    : 0;
+  const expectedCount =
+    typeof promptBatch?.total_simulations === "number" && promptBatch.total_simulations > 0
+      ? promptBatch.total_simulations
+      : simsForBatch.length;
+  const enrichmentProgress =
+    hasAnyEnrichmentStatus && expectedCount > 0 ? Math.round((enrichedDoneCount / expectedCount) * 100) : null;
+
+  // UI contract: a simulation "finishes" only after the batch is finalized (finalize-analysis-batch marks batch.status).
+  // So we keep the in-progress UI while THIS prompt's batch is queued/processing.
+  const hasRunningBatchForThisPrompt = Boolean(promptBatch) && ["queued", "processing"].includes((promptBatch as Record<string, unknown>).status as string);
+
+  // If this prompt has a running batch OR there are no simulations yet but some batch is running, show the "in progress" view.
+  if ((totalSims === 0 && hasRunningAnalysis) || hasRunningBatchForThisPrompt) {
+    const currentBatch = promptBatch ?? (runningBatches || [])[0];
+
+    // Prefer enrichment progress once available; otherwise show simulation progress.
+    // If enrichments are done but the batch hasn't been finalized yet, cap at 99% and show "Finalizing…"
+    const rawProgress =
+      enrichmentProgress !== null
+        ? enrichmentProgress
+        : (currentBatch?.total_simulations > 0
+          ? Math.round((currentBatch.completed_simulations / currentBatch.total_simulations) * 100)
+          : 0);
+    const isFinalizing = enrichmentProgress !== null && enrichmentProgress >= 100 && hasRunningBatchForThisPrompt;
+    const progress = isFinalizing ? Math.min(99, rawProgress) : rawProgress;
     
     return (
       <div className="space-y-6">
@@ -234,7 +272,12 @@ export default async function PromptPage({ params }: PromptPageProps) {
                 />
               </div>
               <div className="flex items-center justify-center gap-2 text-xs text-muted-foreground">
-                <span>{currentBatch.completed_simulations} of {currentBatch.total_simulations} simulations</span>
+                <span>
+                  {enrichmentProgress !== null
+                    ? `${enrichedDoneCount} of ${expectedCount} enrichments`
+                    : `${currentBatch.completed_simulations} of ${currentBatch.total_simulations} simulations`}
+                </span>
+                {isFinalizing && <span>• Finalizing…</span>}
               </div>
             </div>
 
@@ -432,6 +475,7 @@ export default async function PromptPage({ params }: PromptPageProps) {
                   simulation={latestSim} 
                   brandName={brand.name} 
                   brandDomain={brand.domain} 
+                  brandAliases={brandAliases}
                   userTier={userTier} 
                 />
                 
@@ -467,6 +511,7 @@ export default async function PromptPage({ params }: PromptPageProps) {
                                 index={idx + 1}
                                 brandName={brand.name} 
                                 brandDomain={brand.domain} 
+                                brandAliases={brandAliases}
                                 userTier={userTier} 
                               />
                             </div>
@@ -532,7 +577,20 @@ const sectionDefinitions = {
 };
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-function SimulationCard({ simulation, brandName, brandDomain, userTier }: { simulation: any; index?: number; brandName: string; brandDomain: string; userTier: string }) {
+function SimulationCard({
+  simulation,
+  brandName,
+  brandDomain,
+  brandAliases,
+  userTier,
+}: {
+  simulation: any;
+  index?: number;
+  brandName: string;
+  brandDomain: string;
+  brandAliases: string[];
+  userTier: string;
+}) {
   const signals = simulation.selection_signals as SelectionSignals | null;
   const gapAnalysis = signals?.gap_analysis;
   const isArabic = simulation.language === 'ar';
@@ -854,10 +912,29 @@ function SimulationCard({ simulation, brandName, brandDomain, userTier }: { simu
             </div>
           </div>
           <div className="p-4 max-h-[400px] overflow-y-auto">
-            <div 
-              className="prose prose-sm dark:prose-invert max-w-none text-sm leading-relaxed"
-              dangerouslySetInnerHTML={{ __html: simulation.ai_response_html || textToSafeHtml(simulation.response_text || "") }}
-            />
+            {(() => {
+              const safeBrandName = brandName || "";
+              const safeBrandDomain = brandDomain || "";
+              const brandCore = safeBrandDomain.replace(/^www\./, "").split(".")[0];
+              const terms = simulation.is_visible ? [safeBrandName, safeBrandDomain, brandCore] : [];
+              const html = simulation.ai_response_html || textToSafeHtml(simulation.response_text || "");
+              const localAliases = (brandAliases || []).filter(Boolean);
+
+              return (
+                <HighlightedHtml
+                  className="prose prose-sm dark:prose-invert max-w-none text-sm leading-relaxed"
+                  html={html}
+                  terms={[
+                    // Always provide brand terms; HighlightedHtml only marks matches if present.
+                    safeBrandName,
+                    safeBrandDomain,
+                    brandCore,
+                    ...(localAliases.slice(0, 10)),
+                    ...(((signals?.brand_mentions as string[]) || []).slice(0, 10)),
+                  ]}
+                />
+              );
+            })()}
           </div>
         </div>
       </section>
@@ -1154,7 +1231,7 @@ function SimulationCard({ simulation, brandName, brandDomain, userTier }: { simu
           <SentimentAnalysisCard
             data={sentimentAnalysis}
             simpleSentiment={signals?.sentiment}
-            brandMentioned={simulation.is_visible}
+            brandMentioned={signals?.is_visible ?? simulation.is_visible}
           />
         </div>
       </section>

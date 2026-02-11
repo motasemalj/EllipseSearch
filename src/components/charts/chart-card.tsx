@@ -15,15 +15,14 @@ export function ChartCard({
 }) {
   return (
     <div className={cn(
-      "rounded-2xl border border-border bg-card overflow-hidden",
-      "transition-all duration-200 hover:shadow-lg hover:shadow-primary/5",
+      "rounded-lg border border-border bg-card overflow-hidden",
       className
     )}>
-      <div className="px-5 py-4 border-b border-border bg-gradient-to-r from-muted/30 to-transparent flex items-start justify-between gap-4">
-        <div className="space-y-0.5">
-          <p className="font-semibold text-[15px] leading-none">{title}</p>
+      <div className="px-5 py-4 border-b border-border flex items-start justify-between gap-4">
+        <div className="space-y-1">
+          <p className="font-semibold text-sm">{title}</p>
           {description && (
-            <p className="text-xs text-muted-foreground leading-relaxed">{description}</p>
+            <p className="text-xs text-muted-foreground">{description}</p>
           )}
         </div>
         {action}

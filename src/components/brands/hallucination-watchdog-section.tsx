@@ -160,15 +160,14 @@ export function HallucinationWatchdogSection({ data, brandId, userTier }: Halluc
   // 4. Pro and detection enabled with result -> Show results
   
   const showUpgradePrompt = !isPro && (!data?.result);
-  // Explicitly enabled but no result AND no_ground_truth flag set
-  const wasEnabledButNoGroundTruth = isPro && data?.enabled === true && !data?.result && data?.no_ground_truth === true;
-  // Enabled but no result for other reasons (e.g., detection failed)
-  const wasEnabledButNoResult = isPro && data?.enabled === true && !data?.result && !data?.no_ground_truth;
-  // Not enabled at all (data is undefined, or data.enabled is explicitly false)
-  const wasNotEnabled = isPro && (!data || data.enabled === false);
+  // Pro policy: hallucination detection is ALWAYS enabled.
+  // If there is no result, we show a "run an analysis" state (never "Enable in your next analysis").
+  const proNoResult = isPro && (!data?.result);
+  const wasEnabledButNoGroundTruth = proNoResult && data?.no_ground_truth === true;
+  const wasEnabledButNoResult = proNoResult && !data?.no_ground_truth;
   
   // Show locked/upgrade state
-  if (showUpgradePrompt || wasNotEnabled || wasEnabledButNoGroundTruth || wasEnabledButNoResult) {
+  if (showUpgradePrompt || wasEnabledButNoGroundTruth || wasEnabledButNoResult) {
     return (
       <Card className="border-2 border-dashed border-amber-500/30 bg-gradient-to-br from-amber-950/10 via-background to-orange-950/10 overflow-hidden relative" id="watchdog">
         {/* Decorative gradient */}
@@ -192,9 +191,7 @@ export function HallucinationWatchdogSection({ data, brandId, userTier }: Halluc
                   ? "Upgrade to Pro to unlock this feature"
                   : wasEnabledButNoGroundTruth
                     ? "Website crawl data needed for detection"
-                    : wasEnabledButNoResult
-                      ? "Detection ran but encountered an issue"
-                      : "Enable in Run Analysis to detect AI lies"
+                    : "Always enabled on Pro"
                 }
               </CardDescription>
             </div>
@@ -258,18 +255,16 @@ export function HallucinationWatchdogSection({ data, brandId, userTier }: Halluc
                     : wasEnabledButNoGroundTruth
                       ? "Gathering Website Data"
                       : wasEnabledButNoResult
-                        ? "Detection Encountered an Issue"
-                        : "Enable in Your Next Analysis"
+                        ? "Hallucination Detection is Active"
+                        : "Hallucination Detection is Active"
                   }
                 </h3>
                 <p className="text-sm text-muted-foreground mb-4 max-w-sm mx-auto">
                   {showUpgradePrompt 
                     ? "Upgrade to Pro to detect when AI lies about your brand's pricing, features, and availability."
                     : wasEnabledButNoGroundTruth
-                      ? "Your website will be crawled automatically when you run the next analysis. The crawl provides 'ground truth' data needed to detect AI hallucinations."
-                      : wasEnabledButNoResult
-                        ? "The detection was enabled but couldn't complete. Please try running the analysis again."
-                        : "Toggle 'AI Hallucination Detection' when running your next analysis to see results here."
+                      ? "Your website will be crawled automatically on the next analysis run. The crawl provides the ground truth needed to verify AI claims."
+                      : "This feature runs automatically for Pro accounts. Run a new analysis to generate the hallucination report for this prompt."
                   }
                 </p>
                 {showUpgradePrompt ? (
@@ -283,13 +278,9 @@ export function HallucinationWatchdogSection({ data, brandId, userTier }: Halluc
                   <p className="text-xs text-amber-600 dark:text-amber-400">
                     Run a new analysis — website crawl will start automatically
                   </p>
-                ) : wasEnabledButNoResult ? (
-                  <p className="text-xs text-amber-600 dark:text-amber-400">
-                    Please try running the analysis again
-                  </p>
                 ) : (
                   <p className="text-xs text-amber-600 dark:text-amber-400">
-                    Run a new analysis with Hallucination Detection enabled
+                    Run a new analysis — hallucination detection will run automatically
                   </p>
                 )}
               </div>
