@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import { useParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
+import { getCached, setCache } from "@/lib/client-cache";
 import { CitationsPageSkeleton } from "@/components/loading/dashboard-skeleton";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -82,12 +83,26 @@ export default function CitationsPage() {
   }
 
   useEffect(() => {
-    fetchCitations();
+    const cached = getCached<{
+      sources: CitationSource[];
+      brandDomain: string;
+    }>(`citations-${brandId}`);
+
+    if (cached) {
+      setSources(cached.sources);
+      setBrandDomain(cached.brandDomain);
+      setIsLoading(false);
+      fetchCitations(true);
+    } else {
+      fetchCitations();
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [brandId]);
 
-  async function fetchCitations() {
-    setIsLoading(true);
+  async function fetchCitations(background = false) {
+    if (!background) {
+      setIsLoading(true);
+    }
     const supabase = createClient();
 
     // Get brand domain
@@ -111,6 +126,10 @@ export default function CitationsPage() {
       .limit(500);
 
     if (!simulations || simulations.length === 0) {
+      setCache(`citations-${brandId}`, {
+        sources: [],
+        brandDomain: brand?.domain || "",
+      });
       setIsLoading(false);
       return;
     }
@@ -196,6 +215,13 @@ export default function CitationsPage() {
       .sort((a, b) => b.citations - a.citations);
 
     setSources(sourcesArray);
+
+    // Save to client-side cache
+    setCache(`citations-${brandId}`, {
+      sources: sourcesArray,
+      brandDomain: brand?.domain || "",
+    });
+
     setIsLoading(false);
   }
 

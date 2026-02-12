@@ -17,11 +17,13 @@ const PRICING_BY_CURRENCY: Record<
 };
 
 export function getCurrencyFromHeaders(headers: Headers): PricingCurrency {
+  // First check: infrastructure geo headers (set by Vercel, Cloudflare, etc.)
   const country =
     headers.get("x-vercel-ip-country") ||
     headers.get("cf-ipcountry") ||
     headers.get("x-country-code") ||
-    headers.get("x-geo-country");
+    headers.get("x-geo-country") ||
+    getCountryFromCookie(headers);
 
   switch ((country || "").toUpperCase()) {
     case "AE":
@@ -31,6 +33,13 @@ export function getCurrencyFromHeaders(headers: Headers): PricingCurrency {
     default:
       return "USD";
   }
+}
+
+function getCountryFromCookie(headers: Headers): string | null {
+  const cookieHeader = headers.get("cookie");
+  if (!cookieHeader) return null;
+  const match = cookieHeader.match(/user-country=([A-Z]{2})/i);
+  return match ? match[1] : null;
 }
 
 export function getPricingTiers(currency: PricingCurrency): PricingTier[] {

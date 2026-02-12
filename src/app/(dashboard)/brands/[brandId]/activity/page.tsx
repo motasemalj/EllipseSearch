@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
+import { getCached, setCache } from "@/lib/client-cache";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
@@ -172,7 +173,24 @@ export default function ActivityPage() {
   const [brandDomain, setBrandDomain] = useState<string>("");
 
   useEffect(() => {
-    fetchActivity({ silent: false });
+    const cached = getCached<{
+      batches: AnalysisBatch[];
+      prompts: { id: string; text: string }[];
+      promptCount: number;
+      autoAnalysisEnabled: boolean;
+    }>(`activity-${brandId}`);
+
+    if (cached) {
+      setBatches(cached.batches);
+      setPrompts(cached.prompts);
+      setPromptCount(cached.promptCount);
+      setAutoAnalysisEnabled(cached.autoAnalysisEnabled);
+      setIsLoading(false);
+      hasLoadedOnceRef.current = true;
+      fetchActivity({ silent: true, background: true });
+    } else {
+      fetchActivity({ silent: false });
+    }
     fetchUserData();
     
     // Set up real-time subscription for analysis batches
@@ -257,12 +275,15 @@ export default function ActivityPage() {
     setBrandDomain(brand?.domain || "");
   }
 
-  async function fetchActivity(opts?: { silent?: boolean }) {
+  async function fetchActivity(opts?: { silent?: boolean; background?: boolean }) {
     const silent = Boolean(opts?.silent);
-    if (!hasLoadedOnceRef.current && !silent) {
-      setIsLoading(true);
-    } else {
-      setIsRefreshing(true);
+    const background = Boolean(opts?.background);
+    if (!background) {
+      if (!hasLoadedOnceRef.current && !silent) {
+        setIsLoading(true);
+      } else {
+        setIsRefreshing(true);
+      }
     }
     const supabase = createClient();
 
@@ -285,6 +306,7 @@ export default function ActivityPage() {
         .eq("is_active", true),
     ]);
 
+    let finalBatches: AnalysisBatch[] = [];
     if (batchResult.data && batchResult.data.length > 0) {
       // Fetch visibility data for completed batches
       const batchIds = batchResult.data.map(b => b.id);
@@ -323,6 +345,7 @@ export default function ActivityPage() {
         prompt_id: batch.prompt_id || batchSimData[batch.id]?.promptId || undefined,
       }));
       
+      finalBatches = enrichedBatches;
       setBatches(enrichedBatches);
     } else {
       setBatches([]);
@@ -353,6 +376,14 @@ export default function ActivityPage() {
       setAutoAnalysisEnabled(false);
       setConfig(prev => ({ ...prev, enabled: false }));
     }
+
+    // Save to client-side cache
+    setCache(`activity-${brandId}`, {
+      batches: finalBatches,
+      prompts: promptsResult.data || [],
+      promptCount: promptsResult.data?.length || 0,
+      autoAnalysisEnabled: !!scheduleResult.data?.some(s => s.is_active),
+    });
 
     setIsLoading(false);
     setIsRefreshing(false);

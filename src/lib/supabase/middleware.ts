@@ -77,6 +77,24 @@ export async function updateSession(request: NextRequest) {
     return NextResponse.redirect(url);
   }
 
+  // Geo-based currency detection: persist country as cookie for pricing pages
+  const country =
+    request.headers.get("x-vercel-ip-country") ||
+    request.headers.get("cf-ipcountry") ||
+    request.headers.get("x-country-code") ||
+    request.geo?.country ||
+    "";
+
+  if (country) {
+    supabaseResponse.cookies.set("user-country", country.toUpperCase(), {
+      httpOnly: false,
+      secure: process.env.NODE_ENV === "production",
+      sameSite: "lax",
+      maxAge: 60 * 60 * 24 * 30, // 30 days
+      path: "/",
+    });
+  }
+
   return supabaseResponse;
 }
 

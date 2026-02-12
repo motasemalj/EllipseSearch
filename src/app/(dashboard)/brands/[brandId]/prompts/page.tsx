@@ -27,6 +27,7 @@ import {
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { PromptsPageSkeleton } from "@/components/loading/dashboard-skeleton";
+import { getCached, setCache } from "@/lib/client-cache";
 import {
   Dialog,
   DialogContent,
@@ -101,12 +102,23 @@ export default function BrandPromptsPage() {
   const [runAnalysisAfterAdd, setRunAnalysisAfterAdd] = useState(true);
 
   useEffect(() => {
-    fetchData();
+    // Load from cache instantly, then refetch in background
+    const cacheKey = `prompts-${brandId}`;
+    const cached = getCached<{ prompts: Prompt[]; promptSets: PromptSet[] }>(cacheKey);
+    if (cached) {
+      setPrompts(cached.prompts);
+      setPromptSets(cached.promptSets);
+      setIsLoading(false);
+      // Still refetch in background to keep fresh
+      fetchData(true);
+    } else {
+      fetchData(false);
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [brandId]);
 
-  async function fetchData() {
-    setIsLoading(true);
+  async function fetchData(background = false) {
+    if (!background) setIsLoading(true);
     const supabase = createClient();
 
     // Fetch prompt sets
@@ -157,6 +169,9 @@ export default function BrandPromptsPage() {
         };
       });
       setPrompts(enrichedPrompts);
+      
+      // Cache the data for instant navigation
+      setCache(`prompts-${brandId}`, { prompts: enrichedPrompts, promptSets: promptSets.length > 0 ? promptSets : (setsData || []) });
     }
 
     setIsLoading(false);

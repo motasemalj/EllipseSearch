@@ -18,7 +18,6 @@ import {
   Settings, 
   Search,
   Bell,
-  Coins,
   Menu,
   CheckCircle2,
   AlertCircle,
@@ -33,7 +32,6 @@ import { cn } from "@/lib/utils";
 
 interface HeaderProps {
   user?: { email?: string };
-  credits?: number;
   onMenuClick?: () => void;
 }
 
@@ -150,7 +148,7 @@ const NotificationItem = memo(function NotificationItem({
   );
 });
 
-export function Header({ user, credits, onMenuClick }: HeaderProps) {
+export function Header({ user, onMenuClick }: HeaderProps) {
   const router = useRouter();
   const pathname = usePathname();
   
@@ -377,18 +375,8 @@ export function Header({ user, credits, onMenuClick }: HeaderProps) {
           )}
         </div>
 
-        {/* Right - Credits, Notifications, User */}
+        {/* Right - Notifications, User */}
         <div className="flex items-center gap-1.5">
-          {/* Credits */}
-          {credits !== undefined && (
-            <div className="hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-muted/50">
-              <Coins className="w-3.5 h-3.5 text-primary" />
-              <span className="text-sm font-semibold tabular-nums">
-                {credits.toLocaleString()}
-              </span>
-            </div>
-          )}
-
           {/* Notifications */}
           <DropdownMenu open={showNotifications} onOpenChange={setShowNotifications}>
             <DropdownMenuTrigger asChild>
@@ -457,19 +445,6 @@ export function Header({ user, credits, onMenuClick }: HeaderProps) {
                 </div>
               </DropdownMenuLabel>
               <DropdownMenuSeparator />
-              {credits !== undefined && (
-                <>
-                  <div className="px-2 py-1.5 text-sm text-muted-foreground">
-                    <div className="flex items-center justify-between">
-                      <span>Credits</span>
-                      <span className="font-semibold text-foreground tabular-nums">
-                        {credits.toLocaleString()}
-                      </span>
-                    </div>
-                  </div>
-                  <DropdownMenuSeparator />
-                </>
-              )}
               <DropdownMenuItem onClick={() => router.push("/settings")}>
                 <Settings className="w-4 h-4 mr-2" />
                 Settings

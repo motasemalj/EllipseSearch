@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
+import { getCached, setCache } from "@/lib/client-cache";
 import { AnalyticsPageSkeleton } from "@/components/loading/dashboard-skeleton";
 import { ChartCard } from "@/components/charts/chart-card";
 import { VisibilityTrendChart } from "@/components/charts/visibility-trend";
@@ -87,8 +88,10 @@ export default function AnalyticsPage() {
   const [promptSearchQuery, setPromptSearchQuery] = useState("");
 
   useEffect(() => {
-    async function fetchAnalytics() {
-      setIsLoading(true);
+    async function fetchAnalytics(background = false) {
+      if (!background) {
+        setIsLoading(true);
+      }
       const supabase = createClient();
       
       // Calculate date range
@@ -115,22 +118,29 @@ export default function AnalyticsPage() {
 
       if (!simulations || simulations.length === 0) {
         // Still set prompts even if no simulations
+        const emptyPromptAnalytics: PromptAnalytics[] = prompts ? prompts.map(p => ({
+          id: p.id,
+          text: p.text,
+          totalAnalyses: 0,
+          visibleAnalyses: 0,
+          visibility: 0,
+          lastAnalyzedAt: null,
+          engineBreakdown: {
+            chatgpt: { visible: 0, total: 0 },
+            perplexity: { visible: 0, total: 0 },
+            gemini: { visible: 0, total: 0 },
+            grok: { visible: 0, total: 0 },
+          },
+        })) : [];
         if (prompts) {
-          setPromptAnalytics(prompts.map(p => ({
-            id: p.id,
-            text: p.text,
-            totalAnalyses: 0,
-            visibleAnalyses: 0,
-            visibility: 0,
-            lastAnalyzedAt: null,
-            engineBreakdown: {
-              chatgpt: { visible: 0, total: 0 },
-              perplexity: { visible: 0, total: 0 },
-              gemini: { visible: 0, total: 0 },
-              grok: { visible: 0, total: 0 },
-            },
-          })));
+          setPromptAnalytics(emptyPromptAnalytics);
         }
+        setCache(`analytics-${brandId}`, {
+          engineMetrics: [],
+          trendData: [],
+          overallMetrics: { visibility: 0, visibilityTrend: 0, totalAnalyses: 0, analysesTrend: 0, avgResponseTime: 0 },
+          promptAnalytics: emptyPromptAnalytics,
+        });
         setIsLoading(false);
         return;
       }
@@ -207,8 +217,9 @@ export default function AnalyticsPage() {
       });
 
       // Build prompt analytics
+      let finalPromptAnalytics: PromptAnalytics[] = [];
       if (prompts) {
-        const analytics: PromptAnalytics[] = prompts.map(p => {
+        finalPromptAnalytics = prompts.map(p => {
           const data = promptMap.get(p.id);
           return {
             id: p.id,
@@ -225,7 +236,7 @@ export default function AnalyticsPage() {
             },
           };
         });
-        setPromptAnalytics(analytics);
+        setPromptAnalytics(finalPromptAnalytics);
       }
 
       // Calculate metrics for each engine
@@ -279,10 +290,40 @@ export default function AnalyticsPage() {
         avgResponseTime: 0,
       });
 
+      // Save to client-side cache
+      setCache(`analytics-${brandId}`, {
+        engineMetrics: metrics,
+        trendData: trend,
+        overallMetrics: {
+          visibility: overallVisibility,
+          visibilityTrend: 0,
+          totalAnalyses: simulations.length,
+          analysesTrend: 0,
+          avgResponseTime: 0,
+        },
+        promptAnalytics: finalPromptAnalytics,
+      });
+
       setIsLoading(false);
     }
 
-    fetchAnalytics();
+    const cached = getCached<{
+      engineMetrics: EngineMetrics[];
+      trendData: Array<{ date: string; [key: string]: number | string }>;
+      overallMetrics: { visibility: number; visibilityTrend: number; totalAnalyses: number; analysesTrend: number; avgResponseTime: number };
+      promptAnalytics: PromptAnalytics[];
+    }>(`analytics-${brandId}`);
+
+    if (cached) {
+      setEngineMetrics(cached.engineMetrics);
+      setTrendData(cached.trendData);
+      setOverallMetrics(cached.overallMetrics);
+      setPromptAnalytics(cached.promptAnalytics);
+      setIsLoading(false);
+      fetchAnalytics(true);
+    } else {
+      fetchAnalytics();
+    }
   }, [brandId, timeRange]);
 
   const filteredPrompts = promptAnalytics.filter(p =>

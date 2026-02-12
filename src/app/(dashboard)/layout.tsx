@@ -1,5 +1,5 @@
 import { redirect } from "next/navigation";
-import { getCurrentUser, getUserProfile } from "@/lib/cache";
+import { getCurrentUser } from "@/lib/cache";
 import { Sidebar } from "@/components/dashboard/sidebar";
 import { Header } from "@/components/dashboard/header";
 import { Toaster } from "@/components/ui/sonner";
@@ -17,9 +17,6 @@ export default async function DashboardLayout({
     redirect("/login");
   }
 
-  const profile = await getUserProfile(user.id);
-  const organization = profile?.organizations as { credits_balance?: number } | null;
-
   return (
     <div className="min-h-screen bg-background">
       <RouteProgress />
@@ -32,10 +29,7 @@ export default async function DashboardLayout({
 
       {/* Main Content */}
       <div className="lg:ml-60 min-h-screen flex flex-col">
-        <Header 
-          user={{ email: user.email }} 
-          credits={organization?.credits_balance ?? 0}
-        />
+        <Header user={{ email: user.email }} />
         
         <main className="flex-1 p-6 lg:p-8 overflow-auto">
           <div className="max-w-7xl mx-auto">
