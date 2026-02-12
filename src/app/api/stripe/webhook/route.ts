@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { headers } from "next/headers";
 import Stripe from "stripe";
 import { createClient } from "@supabase/supabase-js";
-import { TIER_LIMITS, type BillingTier } from "@/types";
+import { type BillingTier } from "@/types";
 
 // Lazy initialization to prevent build-time errors
 function getStripe() {
@@ -105,8 +105,6 @@ async function handleCheckoutComplete(session: Stripe.Checkout.Session) {
     return;
   }
 
-  const credits = TIER_LIMITS[tier]?.monthly_credits || 0;
-
   // Mark trial as converted if upgrading from trial
   const { data: currentOrg } = await supabase
     .from("organizations")
@@ -122,7 +120,6 @@ async function handleCheckoutComplete(session: Stripe.Checkout.Session) {
       tier,
       stripe_subscription_id: session.subscription as string,
       stripe_subscription_status: "active",
-      credits_balance: credits,
       // Mark trial as converted if they were on trial
       trial_converted: wasOnTrial ? true : undefined,
       subscription_started_at: new Date().toISOString(),
@@ -225,24 +222,19 @@ async function handleInvoicePaid(invoice: Stripe.Invoice) {
 
   if (!org) return;
 
-  const tier = org.tier as BillingTier;
-  const credits = TIER_LIMITS[tier]?.monthly_credits || 0;
-  
   // Calculate subscription period end (1 month from now)
   const periodEnd = new Date();
   periodEnd.setMonth(periodEnd.getMonth() + 1);
 
-  // Reset credits on renewal
   await supabase
     .from("organizations")
     .update({
-      credits_balance: credits,
       subscription_period_end: periodEnd.toISOString(),
       updated_at: new Date().toISOString(),
     })
     .eq("id", org.id);
 
-  console.log(`Credits reset for org ${org.id}: ${credits} credits`);
+  console.log(`Subscription renewed for org ${org.id}`);
 }
 
 async function handlePaymentFailed(invoice: Stripe.Invoice) {

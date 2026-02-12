@@ -151,7 +151,6 @@ export async function POST(
         *,
         organizations (
           id,
-          credits_balance,
           tier
         )
       `)
@@ -220,11 +219,9 @@ export async function POST(
     let analysisBatchId: string | null = null;
 
     if (shouldRunAnalysis && !skipImmediateForBatchSync && newPromptIds.length > 0) {
-      const org = brand.organizations;
       const totalSimulations = newPromptIds.length * engines.length;
 
-      // Check credits
-      if (org && org.credits_balance >= totalSimulations) {
+      {
         try {
           // Check RPA availability
           const rpaStatus = await isRpaAvailable();
@@ -315,8 +312,6 @@ export async function POST(
           console.error("Analysis trigger error:", analysisError);
           // Don't fail the request - prompts were added successfully
         }
-      } else {
-        console.log(`[Prompts API] Insufficient credits for immediate analysis`);
       }
     }
 
@@ -326,8 +321,6 @@ export async function POST(
       message += ". Analysis started.";
     } else if (skipImmediateForBatchSync) {
       message += ". Will be analyzed in the next scheduled batch.";
-    } else if (shouldRunAnalysis) {
-      message += ". Analysis will run when credits are available.";
     }
 
     return NextResponse.json({

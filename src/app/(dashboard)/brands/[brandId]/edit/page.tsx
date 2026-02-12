@@ -15,7 +15,7 @@ import {
   Globe, 
   MapPin, 
   Building2, 
-  Sparkles, 
+  Zap, 
   Wand2, 
   Tags, 
   Target,
@@ -375,7 +375,7 @@ export default function EditBrandPage() {
           <div className="flex items-center justify-between pb-4 border-b border-border">
             <div className="flex items-center gap-3">
               <div className="p-2 rounded-lg bg-primary/10">
-                <Sparkles className="w-5 h-5 text-primary" />
+                <Zap className="w-5 h-5 text-primary" />
               </div>
               <div>
                 <h2 className="font-semibold">Brand Context</h2>

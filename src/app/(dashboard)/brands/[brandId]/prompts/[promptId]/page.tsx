@@ -30,7 +30,7 @@ import {
   ChevronDown,
   Loader2,
   Zap,
-  Sparkles,
+  Lightbulb,
 } from "lucide-react";
 import {
   Tooltip,
@@ -788,7 +788,7 @@ function SimulationCard({
       {groundingMetadata && (groundingMetadata.web_search_queries?.length || groundingMetadata.x_posts?.length) && (
         <div className="rounded-2xl border border-primary/30 bg-gradient-to-r from-primary/5 via-transparent to-accent/5 p-4">
           <div className="flex items-center gap-3">
-            <Sparkles className="w-5 h-5 text-primary" />
+            <Lightbulb className="w-5 h-5 text-primary" />
             <div className="flex-1">
               {groundingMetadata.web_search_queries?.length ? (
                 <div className="flex flex-wrap items-center gap-2">
@@ -1070,7 +1070,7 @@ function SimulationCard({
               {signals?.competitor_insights && (
                 <div className="pt-3 border-t border-border">
                   <div className="flex items-center gap-2 mb-2">
-                    <Sparkles className="w-3.5 h-3.5 text-amber-500" />
+                    <Lightbulb className="w-3.5 h-3.5 text-amber-500" />
                     <h3 className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Key Strategies</h3>
                   </div>
                   <p className="text-sm text-muted-foreground leading-relaxed">{signals.competitor_insights}</p>

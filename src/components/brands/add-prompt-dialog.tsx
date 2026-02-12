@@ -21,7 +21,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Plus, Loader2, Sparkles, X } from "lucide-react";
+import { Plus, Loader2, Zap, X } from "lucide-react";
 import { toast } from "sonner";
 import { createClient } from "@/lib/supabase/client";
 
@@ -155,7 +155,7 @@ export function AddPromptDialog({
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            <Sparkles className="w-5 h-5 text-primary" />
+            <Zap className="w-5 h-5 text-primary" />
             Add Prompts
           </DialogTitle>
           <DialogDescription>

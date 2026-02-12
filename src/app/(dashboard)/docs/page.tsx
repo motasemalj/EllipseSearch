@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { CodeBlock } from "@/components/ui/code-block";
-import { ArrowRight, BookOpen, KeyRound, LifeBuoy, Sparkles } from "lucide-react";
+import { ArrowRight, BookOpen, KeyRound, LifeBuoy, Zap } from "lucide-react";
 
 export const dynamic = "force-dynamic";
 
@@ -22,7 +22,7 @@ export default function DocsPage() {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         <div className="rounded-2xl border border-border bg-card p-6">
           <div className="flex items-center gap-2 mb-2">
-            <Sparkles className="w-5 h-5 text-primary" />
+            <Zap className="w-5 h-5 text-primary" />
             <h2 className="font-semibold">Quickstart</h2>
           </div>
           <p className="text-sm text-muted-foreground mb-4">

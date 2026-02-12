@@ -2,14 +2,14 @@ import Link from "next/link";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { Globe2, LineChart, Users, Sparkles } from "lucide-react";
+import { Globe2, LineChart, Users, Zap } from "lucide-react";
 
 const focusAreas = [
   {
     title: "Product & Engineering",
     description:
       "Build the core platform that measures AI citations, analyzes signals, and powers agency workflows.",
-    icon: Sparkles,
+    icon: Zap,
   },
   {
     title: "AI & Data",

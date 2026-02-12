@@ -49,7 +49,6 @@ interface DailySlot {
     daily_analyses_enabled: boolean;
     organizations: {
       id: string;
-      credits_balance: number;
       tier: string;
     };
   };
@@ -80,7 +79,6 @@ export const processDailyAnalysesTask = schedules.task({
           daily_analyses_enabled,
           organizations (
             id,
-            credits_balance,
             tier
           )
         )
@@ -122,9 +120,8 @@ export const processDailyAnalysesTask = schedules.task({
           continue;
         }
         
-        // Skip if no credits
-        if (!org || org.credits_balance <= 0) {
-          console.log(`[Daily Analyses] Skipping slot ${slot.id} - no credits`);
+        if (!org) {
+          console.log(`[Daily Analyses] Skipping slot ${slot.id} - no organization`);
           await supabase
             .from("daily_analysis_slots")
             .update({ status: "skipped" })
@@ -154,17 +151,6 @@ export const processDailyAnalysesTask = schedules.task({
         const engines = ALL_ENGINES;
         
         const totalSimulations = promptCount * engines.length;
-        
-        // Check if enough credits
-        if (org.credits_balance < totalSimulations) {
-          console.log(`[Daily Analyses] Skipping slot ${slot.id} - insufficient credits (need ${totalSimulations}, have ${org.credits_balance})`);
-          await supabase
-            .from("daily_analysis_slots")
-            .update({ status: "skipped" })
-            .eq("id", slot.id);
-          skipped++;
-          continue;
-        }
         
         // Mark slot as running
         await supabase

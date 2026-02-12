@@ -17,6 +17,7 @@ import {
 interface BrandTabNavigationProps {
   brandId: string;
   brandName: string;
+  promptCount?: number;
 }
 
 const tabs = [
@@ -72,7 +73,7 @@ const tabs = [
 ];
 
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
-export function BrandTabNavigation({ brandId, brandName }: BrandTabNavigationProps) {
+export function BrandTabNavigation({ brandId, brandName, promptCount }: BrandTabNavigationProps) {
   const pathname = usePathname();
 
   const isActive = (tab: typeof tabs[0]) => {
@@ -83,6 +84,8 @@ export function BrandTabNavigation({ brandId, brandName }: BrandTabNavigationPro
     return pathname.startsWith(tabHref);
   };
 
+  const needsPrompts = promptCount === 0;
+
   return (
     <div className="border-b border-border bg-card/50 px-6 lg:px-8">
       <div className="max-w-7xl mx-auto">
@@ -90,6 +93,8 @@ export function BrandTabNavigation({ brandId, brandName }: BrandTabNavigationPro
           {tabs.map((tab) => {
             const Icon = tab.icon;
             const active = isActive(tab);
+            const isPromptsTab = tab.id === "prompts";
+            const shouldGlow = isPromptsTab && needsPrompts && !active;
             
             return (
               <Link
@@ -99,11 +104,18 @@ export function BrandTabNavigation({ brandId, brandName }: BrandTabNavigationPro
                   "relative flex items-center gap-2 px-4 py-3 text-sm font-medium transition-colors whitespace-nowrap",
                   active
                     ? "text-foreground"
-                    : "text-muted-foreground hover:text-foreground"
+                    : "text-muted-foreground hover:text-foreground",
+                  shouldGlow && "text-emerald-600 dark:text-emerald-400"
                 )}
               >
-                <Icon className="w-4 h-4" />
+                <Icon className={cn("w-4 h-4", shouldGlow && "animate-pulse")} />
                 <span>{tab.label}</span>
+                {shouldGlow && (
+                  <span className="relative flex h-2 w-2">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
+                    <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500" />
+                  </span>
+                )}
                 {active && (
                   <span className="absolute bottom-0 left-2 right-2 h-0.5 bg-primary rounded-t-full" />
                 )}

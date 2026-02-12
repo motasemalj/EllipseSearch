@@ -22,7 +22,15 @@ async function getBrandInfo(brandId: string, organizationId: string) {
     .eq("organization_id", organizationId)
     .single();
   
-  return brand;
+  if (!brand) return null;
+
+  // Get prompt count for the brand
+  const { count: promptCount } = await supabase
+    .from("prompts")
+    .select("*", { count: "exact", head: true })
+    .eq("brand_id", brandId);
+  
+  return { ...brand, promptCount: promptCount || 0 };
 }
 
 export default async function BrandLayout({ children, params }: BrandLayoutProps) {
@@ -79,7 +87,7 @@ export default async function BrandLayout({ children, params }: BrandLayoutProps
       </div>
       
       {/* Tab Navigation */}
-      <BrandTabNavigation brandId={brandId} brandName={brand.name} />
+      <BrandTabNavigation brandId={brandId} brandName={brand.name} promptCount={brand.promptCount} />
       
       {/* Page Content */}
       <div className="px-6 lg:px-8 py-6">

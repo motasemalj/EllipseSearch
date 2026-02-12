@@ -21,7 +21,7 @@ export const expireTrialsTask = schedules.task({
     // Find all trial organizations that have expired
     const { data: expiredTrials, error: fetchError } = await supabase
       .from("organizations")
-      .select("id, name, trial_expires_at, credits_balance")
+      .select("id, name, trial_expires_at")
       .eq("tier", "trial")
       .eq("trial_converted", false)
       .lt("trial_expires_at", new Date().toISOString());
@@ -48,8 +48,6 @@ export const expireTrialsTask = schedules.task({
           .from("organizations")
           .update({
             tier: "free",
-            // Cap credits at free tier maximum (50)
-            credits_balance: Math.min(org.credits_balance || 0, 50),
             updated_at: new Date().toISOString(),
           })
           .eq("id", org.id);

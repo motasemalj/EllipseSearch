@@ -131,7 +131,7 @@ export const checkPromptVisibility = task({
     // 1. Fetch brand details (minimal fields only)
     const { data: brand, error: brandError } = await supabase
       .from("brands")
-      .select("id, name, domain, brand_aliases, settings, last_crawled_at, ground_truth_summary, organizations(id, credits_balance)")
+      .select("id, name, domain, brand_aliases, settings, last_crawled_at, ground_truth_summary, organizations(id)")
       .eq("id", brand_id)
       .single();
 
@@ -139,7 +139,8 @@ export const checkPromptVisibility = task({
       throw new Error(`Brand not found: ${brand_id}`);
     }
 
-    const organization = Array.isArray(brand.organizations)
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    const _organization = Array.isArray(brand.organizations)
       ? brand.organizations[0]
       : brand.organizations;
 
@@ -630,13 +631,6 @@ export const checkPromptVisibility = task({
         await supabase.rpc("increment_batch_completed", { batch_id: analysis_batch_id });
       } catch {
         // ignore (RPC may not exist in some environments)
-      }
-
-      // 12. Deduct credit (only if we have credits)
-      const creditsBalance = (organization as { credits_balance?: number } | null | undefined)?.credits_balance;
-      const orgId = (organization as { id?: string } | null | undefined)?.id;
-      if (typeof creditsBalance === "number" && creditsBalance > 0 && typeof orgId === "string") {
-        await supabase.rpc("deduct_credit", { org_id: orgId });
       }
 
       logger.info("Simulation completed", {

@@ -21,9 +21,12 @@ export function Logo({ className, size = "md", showText = true }: LogoProps) {
     lg: "text-3xl",
   };
 
+  // Single blade path, rotated 4 times for perfect symmetry.
+  // Creates the swirling vortex / pinwheel shape.
+  const blade = "M 21 17 C 22 10 28 5 34 10 C 38 14 34 20 25 21 C 23 21 21 20 21 17 Z";
+
   return (
     <div className={cn("flex items-center gap-2", className)}>
-      {/* Ellipse Icon - Stylized search/visibility concept */}
       <div className={cn("relative", sizes[size])}>
         <svg
           viewBox="0 0 40 40"
@@ -31,44 +34,12 @@ export function Logo({ className, size = "md", showText = true }: LogoProps) {
           xmlns="http://www.w3.org/2000/svg"
           className="w-full h-full"
         >
-          {/* Outer ellipse ring */}
-          <ellipse
-            cx="20"
-            cy="20"
-            rx="16"
-            ry="12"
-            stroke="url(#logoGradient)"
-            strokeWidth="3"
-            fill="none"
-            className="opacity-90"
-          />
-          {/* Inner focused point */}
-          <circle
-            cx="20"
-            cy="20"
-            r="5"
-            fill="url(#logoGradient)"
-          />
-          {/* Visibility rays */}
-          <path
-            d="M8 20 L4 20 M32 20 L36 20 M20 10 L20 6 M20 30 L20 34"
-            stroke="url(#logoGradient)"
-            strokeWidth="2"
-            strokeLinecap="round"
-            className="opacity-60"
-          />
-          <defs>
-            <linearGradient
-              id="logoGradient"
-              x1="0%"
-              y1="0%"
-              x2="100%"
-              y2="100%"
-            >
-              <stop offset="0%" stopColor="hsl(210 100% 50%)" />
-              <stop offset="100%" stopColor="hsl(188 78% 45%)" />
-            </linearGradient>
-          </defs>
+          <g fill="currentColor">
+            <path d={blade} />
+            <path d={blade} transform="rotate(90 20 20)" />
+            <path d={blade} transform="rotate(180 20 20)" />
+            <path d={blade} transform="rotate(270 20 20)" />
+          </g>
         </svg>
       </div>
       

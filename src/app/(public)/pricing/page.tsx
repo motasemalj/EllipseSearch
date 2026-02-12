@@ -3,7 +3,7 @@ import { headers } from "next/headers";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Check, Sparkles } from "lucide-react";
+import { Check, Crown } from "lucide-react";
 import { TIER_LIMITS } from "@/types";
 import { DirhamSymbol } from "@/components/ui/dirham-symbol";
 import { formatCurrencyAmount, getCurrencyFromHeaders, getPricingTiers } from "@/lib/pricing";
@@ -16,12 +16,12 @@ const plans = [
     period: "month",
     popular: false,
     features: [
-      `${TIER_LIMITS.starter.monthly_credits.toLocaleString()} credits/month`,
       `Up to ${TIER_LIMITS.starter.max_brands} brands`,
       `${TIER_LIMITS.starter.max_prompts_per_brand} prompts per brand`,
       "All 4 AI engines",
       "English + Arabic support",
       "Selection signal analysis",
+      "Daily automated analysis",
       "Email support",
     ],
     cta: "Start with Starter",
@@ -33,12 +33,12 @@ const plans = [
     period: "month",
     popular: true,
     features: [
-      `${TIER_LIMITS.pro.monthly_credits.toLocaleString()} credits/month`,
       `Up to ${TIER_LIMITS.pro.max_brands} brands`,
       `${TIER_LIMITS.pro.max_prompts_per_brand} prompts per brand`,
       "All 4 AI engines",
       "English + Arabic support",
       "Selection signal analysis",
+      "Hallucination detection",
       "Gap analysis reports",
       "Priority support",
       "API access",
@@ -52,7 +52,6 @@ const plans = [
     period: "month",
     popular: false,
     features: [
-      `${TIER_LIMITS.agency.monthly_credits.toLocaleString()} credits/month`,
       `Up to ${TIER_LIMITS.agency.max_brands} brands`,
       `${TIER_LIMITS.agency.max_prompts_per_brand} prompts per brand`,
       "All 4 AI engines",
@@ -69,24 +68,14 @@ const plans = [
 
 const faqs = [
   {
-    question: "What is a credit?",
-    answer:
-      "Each credit represents one simulation—querying one AI engine with one keyword. For example, running 10 keywords across all 4 engines uses 40 credits.",
-  },
-  {
     question: "Can I upgrade or downgrade my plan?",
     answer:
       "Yes! You can change your plan at any time. Upgrades take effect immediately, and downgrades take effect at the start of your next billing cycle.",
   },
   {
-    question: "Do unused credits roll over?",
-    answer:
-      "Credits reset at the start of each billing cycle and don't roll over. We recommend choosing a plan that fits your typical monthly usage.",
-  },
-  {
     question: "Is there a free trial?",
     answer:
-      "Yes! All new accounts start with a free trial that includes 200 credits to test the platform with your clients.",
+      "Yes! All new accounts start with a 3-day trial limited to 1 brand and 5 prompts.",
   },
   {
     question: "What payment methods do you accept?",
@@ -100,8 +89,8 @@ const faqs = [
   },
 ];
 
-export default function PricingPage() {
-  const currency = getCurrencyFromHeaders(headers());
+export default async function PricingPage() {
+  const currency = getCurrencyFromHeaders(await headers());
   const pricingTiers = getPricingTiers(currency);
 
   const plansWithPricing = plans.map((plan) => {
@@ -144,7 +133,7 @@ export default function PricingPage() {
                 {plan.popular && (
                   <div className="absolute -top-3 left-1/2 -translate-x-1/2">
                     <Badge className="bg-primary text-primary-foreground">
-                      <Sparkles className="h-3 w-3 mr-1" />
+                      <Crown className="h-3 w-3 mr-1" />
                       Most Popular
                     </Badge>
                   </div>

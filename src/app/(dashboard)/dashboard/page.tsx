@@ -8,7 +8,7 @@ import {
   Eye,
   Search,
   ArrowRight,
-  Sparkles,
+  Zap,
   Bot,
   Activity,
   Building2,
@@ -260,7 +260,7 @@ function EmptyState() {
     <div className="enterprise-card">
       <div className="empty-state py-16">
         <div className="w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center mx-auto mb-4">
-          <Sparkles className="w-8 h-8 text-primary" />
+          <Zap className="w-8 h-8 text-primary" />
         </div>
         <h3 className="empty-state-title">Get started with AI Visibility</h3>
         <p className="empty-state-description">

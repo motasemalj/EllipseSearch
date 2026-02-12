@@ -103,46 +103,11 @@ export async function POST(request: NextRequest) {
 
     const cleanedSimulations = simResult?.length || 0;
 
-    // Calculate credits to refund
-    let totalRefund = 0;
-    for (const batch of userBatches) {
-      // Get batch details for credit calculation
-      const { data: batchDetails } = await supabase
-        .from("analysis_batches")
-        .select("total_simulations, completed_simulations")
-        .eq("id", batch.id)
-        .single();
-      
-      if (batchDetails) {
-        const incomplete = (batchDetails.total_simulations || 0) - (batchDetails.completed_simulations || 0);
-        totalRefund += incomplete;
-      }
-    }
-
-    // Refund credits
-    if (totalRefund > 0) {
-      const { data: org } = await supabase
-        .from("organizations")
-        .select("credits_balance")
-        .eq("id", profile.organization_id)
-        .single();
-
-      if (org) {
-        await supabase
-          .from("organizations")
-          .update({ 
-            credits_balance: (org.credits_balance || 0) + totalRefund 
-          })
-          .eq("id", profile.organization_id);
-      }
-    }
-
     return NextResponse.json({
       success: true,
       message: `Cleaned up ${userBatches.length} stuck batch(es)`,
       cleaned_batches: userBatches.length,
       cleaned_simulations: cleanedSimulations,
-      refunded_credits: totalRefund,
     });
   } catch (error) {
     console.error("Cleanup error:", error);

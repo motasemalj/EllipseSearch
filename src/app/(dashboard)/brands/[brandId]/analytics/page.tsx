@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
+import { AnalyticsPageSkeleton } from "@/components/loading/dashboard-skeleton";
 import { ChartCard } from "@/components/charts/chart-card";
 import { VisibilityTrendChart } from "@/components/charts/visibility-trend";
 import { Button } from "@/components/ui/button";
@@ -13,7 +14,6 @@ import {
   TrendingUp, 
   TrendingDown, 
   Calendar,
-  Loader2,
   ArrowUpRight,
   ArrowDownRight,
   MessageSquare,
@@ -290,11 +290,7 @@ export default function AnalyticsPage() {
   );
 
   if (isLoading) {
-    return (
-      <div className="flex items-center justify-center py-12">
-        <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
-      </div>
-    );
+    return <AnalyticsPageSkeleton />;
   }
 
   return (

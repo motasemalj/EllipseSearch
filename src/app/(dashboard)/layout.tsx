@@ -4,6 +4,7 @@ import { Sidebar } from "@/components/dashboard/sidebar";
 import { Header } from "@/components/dashboard/header";
 import { Toaster } from "@/components/ui/sonner";
 import { SubscriptionBanner } from "@/components/subscription/subscription-banner";
+import { RouteProgress } from "@/components/ui/route-progress";
 
 export default async function DashboardLayout({
   children,
@@ -21,6 +22,8 @@ export default async function DashboardLayout({
 
   return (
     <div className="min-h-screen bg-background">
+      <RouteProgress />
+      
       {/* Subscription Banner */}
       <SubscriptionBanner />
       

@@ -10,7 +10,6 @@ import {
   Languages,
   Lightbulb,
   Search,
-  Sparkles,
   Target,
   TrendingUp,
   Zap,
@@ -48,7 +47,7 @@ const features = [
       "Compare your client's content against winning sources. See exactly what's missing and why it matters.",
   },
   {
-    icon: Sparkles,
+    icon: Lightbulb,
     title: "Actionable Recommendations",
     description:
       "Get specific, technical fixes for each prompt. Transform insights into content improvements that work.",
@@ -97,19 +96,19 @@ const steps = [
     number: "01",
     title: "Add Your Brands",
     description:
-      "Set up your client brands with their domains, prompts, and target languages.",
+      "Set up your client brands with their domains, target prompts, and preferred languages.",
   },
   {
     number: "02",
-    title: "Run Simulations",
+    title: "Automated Daily Analysis",
     description:
-      "We query AI engines with your prompts and analyze how they respond—who they cite and why.",
+      "We automatically run daily analyses across all major AI engines, building a rich dataset over time.",
   },
   {
     number: "03",
-    title: "Get Insights",
+    title: "Track Meaningful Trends",
     description:
-      "See gap analysis, selection signals, and specific recommendations to improve AI visibility.",
+      "See how your brand visibility evolves with actionable trends, gap analysis, and optimization recommendations that improve over time.",
   },
 ];
 

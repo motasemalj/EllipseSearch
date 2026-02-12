@@ -96,7 +96,6 @@ export const runScheduledAnalysesTask = schedules.task({
           organization_id,
           organizations (
             id,
-            credits_balance,
             tier
           )
         )
@@ -122,17 +121,8 @@ export const runScheduledAnalysesTask = schedules.task({
     let skipped = 0;
     let failed = 0;
     
-    for (const schedule of dueSchedules as (ScheduledAnalysis & { brands: { organizations: { credits_balance: number; tier: string } } })[]) {
+    for (const schedule of dueSchedules as (ScheduledAnalysis & { brands: { organizations: { tier: string } } })[]) {
       try {
-        const org = schedule.brands?.organizations;
-        
-        // Check if organization has credits
-        if (!org || org.credits_balance <= 0) {
-          console.log(`[Scheduler] Skipping schedule ${schedule.id} - no credits`);
-          skipped++;
-          continue;
-        }
-        
         // Get prompts (brand-level schedules run all active prompts for the brand)
         let promptsToProcess: { id: string; text: string }[] = [];
 
@@ -172,12 +162,6 @@ export const runScheduledAnalysesTask = schedules.task({
         }
         
         const totalSimulations = promptCount * schedule.engines.length;
-        
-        if (org.credits_balance < totalSimulations) {
-          console.log(`[Scheduler] Skipping schedule ${schedule.id} - insufficient credits (need ${totalSimulations}, have ${org.credits_balance})`);
-          skipped++;
-          continue;
-        }
         
         // Determine RPA vs API routing
         const rpaStatus = await isRpaAvailable();

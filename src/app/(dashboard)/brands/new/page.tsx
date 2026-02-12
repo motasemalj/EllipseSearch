@@ -334,7 +334,7 @@ export default function NewBrandPage() {
         description: initialPrompts.length > 0 
           ? `Added ${initialPrompts.length} prompt${initialPrompts.length > 1 ? 's' : ''}. ${analysisConfig.autoAnalysisEnabled ? 'Analysis started!' : ''}`
           : analysisConfig.autoAnalysisEnabled 
-            ? "Auto-analysis is enabled and will run 3x daily."
+            ? "Auto-analysis is enabled."
             : "You can run analyses manually from the brand dashboard.",
       });
 
@@ -690,7 +690,7 @@ export default function NewBrandPage() {
                       <div>
                         <p className="font-medium">Automatic Analysis</p>
                         <p className="text-sm text-muted-foreground mt-1">
-                          Run analysis 3 times daily for consistent monitoring
+                          Automatically run daily analysis
                         </p>
                       </div>
                       <button
@@ -712,9 +712,6 @@ export default function NewBrandPage() {
                     </div>
                     {analysisConfig.autoAnalysisEnabled && (
                       <div className="mt-3 flex items-center gap-2 text-xs text-muted-foreground">
-                        <span className="px-2 py-0.5 rounded bg-success/10 text-success font-medium">
-                          Runs at 8:00, 14:00, 20:00 UTC
-                        </span>
                         {initialPrompts.length > 0 && (
                           <span className="px-2 py-0.5 rounded bg-primary/10 text-primary font-medium">
                             First analysis starts immediately

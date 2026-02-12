@@ -1,6 +1,7 @@
 import { redirect, notFound } from "next/navigation";
 import { getCurrentUser, getUserProfile } from "@/lib/cache";
 import { getBrandPageData } from "@/lib/data";
+import { createClient } from "@/lib/supabase/server";
 import { SupportedEngine } from "@/types";
 import { VisibilityGauge } from "@/components/ui/visibility-gauge";
 import { ChartCard } from "@/components/charts/chart-card";
@@ -13,6 +14,7 @@ import {
   Eye,
   BarChart3,
   Calendar,
+  Loader2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -51,8 +53,31 @@ export default async function BrandPage({ params }: BrandPageProps) {
   const { brand, stats, charts, autoAnalysisStatus } = data;
   const engines: SupportedEngine[] = ["chatgpt", "perplexity", "gemini", "grok"];
 
+  const supabase = await createClient();
+  const { count: runningBatchCount } = await supabase
+    .from("analysis_batches")
+    .select("*", { count: "exact", head: true })
+    .eq("brand_id", brandId)
+    .in("status", ["processing", "queued", "awaiting_rpa"]);
+
+  const isAnalysisRunning = (runningBatchCount || 0) > 0;
+  const hasNoData = stats.totalSimulations === 0;
+
   return (
-    <div className="space-y-6 animate-fade-in">
+    <div className="relative space-y-6 animate-fade-in">
+      {hasNoData && isAnalysisRunning && (
+        <div className="absolute inset-0 z-10 flex items-center justify-center bg-background/60 backdrop-blur-sm rounded-2xl">
+          <div className="text-center p-8 rounded-2xl border border-border bg-card shadow-lg max-w-md mx-4">
+            <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-primary/10 mb-4">
+              <Loader2 className="w-8 h-8 text-primary animate-spin" />
+            </div>
+            <h3 className="text-lg font-semibold mb-2">Analysis in Progress</h3>
+            <p className="text-sm text-muted-foreground">
+              Your first analysis is running across AI engines. Results will appear here once the analysis is complete.
+            </p>
+          </div>
+        </div>
+      )}
       {/* Key Metrics Row */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         {/* Overall Visibility */}

@@ -18,7 +18,7 @@ import {
   Search,
   LucideIcon,
   Clock,
-  Sparkles,
+  Zap,
 } from "lucide-react";
 
 interface NavItem {
@@ -211,7 +211,7 @@ const UpgradeCTA = memo(function UpgradeCTA() {
     <div className="p-4 border-t border-border">
       <div className="rounded-lg bg-muted/50 p-4 border border-border">
         <div className="flex items-center gap-2 mb-2">
-          <Sparkles className="w-4 h-4 text-primary" />
+          <Zap className="w-4 h-4 text-primary" />
           <span className="text-sm font-medium">Upgrade</span>
         </div>
         <p className="text-xs text-muted-foreground mb-3">

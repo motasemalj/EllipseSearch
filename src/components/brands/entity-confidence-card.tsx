@@ -12,7 +12,7 @@ import {
   ChevronUp,
   Link as LinkIcon,
   Plus,
-  Sparkles,
+  Lightbulb,
   Copy,
   Check,
 } from "lucide-react";
@@ -229,7 +229,7 @@ ${JSON.stringify(schema, null, 2)}
           {entityData.recommendation && (
             <div className="px-5 py-3 border-b border-border/50">
               <div className="flex items-start gap-2">
-                <Sparkles className="w-4 h-4 text-primary mt-0.5 shrink-0" />
+                <Lightbulb className="w-4 h-4 text-primary mt-0.5 shrink-0" />
                 <p className="text-sm text-muted-foreground">{entityData.recommendation}</p>
               </div>
             </div>

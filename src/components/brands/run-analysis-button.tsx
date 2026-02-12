@@ -21,8 +21,6 @@ import {
   ShieldAlert, 
   Lock, 
   Crown,
-  Coins,
-  AlertTriangle,
   Globe,
 } from "lucide-react";
 import { ChatGPTIcon, PerplexityIcon, GeminiIcon, GrokIcon } from "@/components/ui/engine-badge";
@@ -55,7 +53,6 @@ export function RunAnalysisButton({ brandId, keywordSetId, keywordsCount }: RunA
   const [enableWatchdog, setEnableWatchdog] = useState(false);
   const [userTier, setUserTier] = useState<BillingTier>("free");
   const [hasCrawledData, setHasCrawledData] = useState(false);
-  const [creditsBalance, setCreditsBalance] = useState<number>(0);
   const [brandDomain, setBrandDomain] = useState<string>("");
 
   useEffect(() => {
@@ -72,13 +69,12 @@ export function RunAnalysisButton({ brandId, keywordSetId, keywordsCount }: RunA
         if (profile?.organization_id) {
           const { data: org } = await supabase
             .from("organizations")
-            .select("tier, credits_balance")
+            .select("tier")
             .eq("id", profile.organization_id)
             .single();
           
           if (org) {
             setUserTier(org.tier as BillingTier);
-            setCreditsBalance(org.credits_balance || 0);
           }
         }
       }
@@ -101,13 +97,12 @@ export function RunAnalysisButton({ brandId, keywordSetId, keywordsCount }: RunA
         if (profile?.organization_id) {
           const { data: org } = await supabase
             .from("organizations")
-            .select("tier, credits_balance")
+            .select("tier")
             .eq("id", profile.organization_id)
             .single();
           
           if (org) {
             setUserTier(org.tier as BillingTier);
-            setCreditsBalance(org.credits_balance || 0);
           }
         }
       }
@@ -131,8 +126,6 @@ export function RunAnalysisButton({ brandId, keywordSetId, keywordsCount }: RunA
   const canUseWatchdog = tierLimits.hallucination_watchdog;
 
   const totalSimulations = keywordsCount * selectedEngines.length * selectedRegions.length;
-  const estimatedCredits = totalSimulations;
-  const hasEnoughCredits = creditsBalance >= estimatedCredits;
 
   const handleToggleEngine = (engine: SupportedEngine) => {
     setSelectedEngines(prev => {
@@ -207,13 +200,6 @@ export function RunAnalysisButton({ brandId, keywordSetId, keywordsCount }: RunA
 
     if (selectedRegions.length === 0) {
       toast.error("Select at least one region");
-      return;
-    }
-
-    if (!hasEnoughCredits) {
-      toast.error("Insufficient credits", {
-        description: `You need ${estimatedCredits} credits but only have ${creditsBalance}.`,
-      });
       return;
     }
 
@@ -443,50 +429,6 @@ export function RunAnalysisButton({ brandId, keywordSetId, keywordsCount }: RunA
             )}
           </div>
 
-          {/* Credits Summary */}
-          <div className="rounded-lg bg-muted/50 p-4 space-y-3">
-            <div className="flex items-center justify-between p-2.5 rounded bg-background border border-border">
-              <div className="flex items-center gap-2">
-                <Coins className="w-4 h-4 text-primary" />
-                <span className="text-sm font-medium">Your Credits</span>
-              </div>
-              <span className={cn(
-                "text-lg font-bold",
-                hasEnoughCredits ? "text-success" : "text-destructive"
-              )}>
-                {creditsBalance.toLocaleString()}
-              </span>
-            </div>
-
-            <div className="space-y-1.5 text-sm">
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">Prompts × Engines × Regions</span>
-                <span className="font-medium">{keywordsCount} × {selectedEngines.length} × {selectedRegions.length}</span>
-              </div>
-              <div className="flex justify-between pt-1.5 border-t border-border">
-                <span className="font-medium">Total Cost</span>
-                <span className={cn(
-                  "font-bold",
-                  hasEnoughCredits ? "text-primary" : "text-destructive"
-                )}>
-                  {estimatedCredits} credits
-                </span>
-              </div>
-            </div>
-
-            {!hasEnoughCredits && (
-              <div className="flex items-start gap-2 p-2.5 rounded bg-destructive/10 border border-destructive/20">
-                <AlertTriangle className="w-4 h-4 text-destructive mt-0.5 flex-shrink-0" />
-                <div>
-                  <p className="text-sm font-medium text-destructive">Insufficient credits</p>
-                  <p className="text-xs text-muted-foreground">
-                    You need {estimatedCredits - creditsBalance} more credits.
-                  </p>
-                </div>
-              </div>
-            )}
-          </div>
-
           {keywordsCount === 0 && (
             <div className="flex items-start gap-2 p-3 rounded-lg bg-warning/10 text-warning">
               <Info className="w-4 h-4 mt-0.5 flex-shrink-0" />
@@ -503,7 +445,7 @@ export function RunAnalysisButton({ brandId, keywordSetId, keywordsCount }: RunA
           </Button>
           <Button 
             onClick={handleRun} 
-            disabled={isLoading || keywordsCount === 0 || !hasEnoughCredits}
+            disabled={isLoading || keywordsCount === 0}
             className="gap-2"
           >
             {isLoading ? (

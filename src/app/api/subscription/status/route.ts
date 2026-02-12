@@ -60,11 +60,9 @@ export async function GET() {
       organizationId: organization.id,
       organizationName: organization.name,
       
-      // Current tier and credits
+      // Current tier
       tier: tier,
       tierDisplayName: formatTierName(tier),
-      creditsBalance: organization.credits_balance,
-      monthlyCredits: limits.monthly_credits,
       
       // Trial status
       isTrialActive: tier === 'trial' && !trialExpired,

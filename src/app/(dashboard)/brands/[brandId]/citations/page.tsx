@@ -3,13 +3,13 @@
 import { useState, useEffect } from "react";
 import { useParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
+import { CitationsPageSkeleton } from "@/components/loading/dashboard-skeleton";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import {
   Link2,
   ExternalLink,
   Search,
-  Loader2,
   Globe,
   Check,
   ChevronDown,
@@ -211,11 +211,7 @@ export default function CitationsPage() {
   const brandShare = totalCitations > 0 ? Math.round((brandCitations / totalCitations) * 100) : 0;
 
   if (isLoading) {
-    return (
-      <div className="flex items-center justify-center py-12">
-        <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
-      </div>
-    );
+    return <CitationsPageSkeleton />;
   }
 
   return (

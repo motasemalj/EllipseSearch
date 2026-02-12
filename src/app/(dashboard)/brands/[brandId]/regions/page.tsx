@@ -3,12 +3,12 @@
 import { useState, useEffect } from "react";
 import { useParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
+import { AnalyticsPageSkeleton } from "@/components/loading/dashboard-skeleton";
 import { Button } from "@/components/ui/button";
 import {
   Globe,
   ArrowUpDown,
   Filter,
-  Loader2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { REGIONS, SupportedRegion, SupportedEngine } from "@/types";
@@ -156,11 +156,7 @@ export default function RegionsPage() {
   const selectedData = sortedData.filter((r) => selectedRegions.includes(r.region));
 
   if (isLoading) {
-    return (
-      <div className="flex items-center justify-center py-12">
-        <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
-      </div>
-    );
+    return <AnalyticsPageSkeleton />;
   }
 
   if (regionData.length === 0) {

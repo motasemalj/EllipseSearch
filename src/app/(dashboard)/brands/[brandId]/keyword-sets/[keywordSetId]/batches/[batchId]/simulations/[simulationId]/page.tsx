@@ -21,7 +21,7 @@ import {
   Clock,
   MessageSquare,
   Trophy,
-  Sparkles,
+  Lightbulb,
   Award,
 } from "lucide-react";
 import { EngineBadge } from "@/components/ui/engine-badge";
@@ -301,7 +301,7 @@ export default async function SimulationPage({ params }: SimulationPageProps) {
       {groundingMetadata && (groundingMetadata.web_search_queries?.length || groundingMetadata.x_posts?.length) && (
         <div className="rounded-2xl border border-primary/30 bg-gradient-to-r from-primary/5 via-transparent to-accent/5 p-4">
           <div className="flex items-center gap-3">
-            <Sparkles className="w-5 h-5 text-primary" />
+            <Lightbulb className="w-5 h-5 text-primary" />
             <div className="flex-1">
               {groundingMetadata.web_search_queries?.length ? (
                 <div className="flex flex-wrap items-center gap-2">

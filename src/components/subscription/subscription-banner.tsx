@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import Link from "next/link";
-import { X, Clock, Crown, Zap, AlertTriangle } from "lucide-react";
+import { X, Clock, Crown, AlertTriangle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
@@ -12,8 +12,6 @@ interface SubscriptionStatus {
   isTrialActive: boolean;
   isTrialExpired: boolean;
   trialDaysRemaining: number;
-  creditsBalance: number;
-  monthlyCredits: number;
   isPaidSubscription: boolean;
   showTrialBanner: boolean;
   needsUpgrade: boolean;
@@ -40,10 +38,7 @@ export function SubscriptionBanner() {
 
   if (!status || dismissed) return null;
 
-  // Don't show banner for paid subscribers unless they're running low on credits
-  if (status.isPaidSubscription && status.creditsBalance > (status.monthlyCredits * 0.1)) {
-    return null;
-  }
+  if (status.isPaidSubscription) return null;
 
   // Trial expired - always show
   if (status.isTrialExpired) {
@@ -99,60 +94,6 @@ export function SubscriptionBanner() {
               <X className="w-4 h-4" />
             </Button>
           </div>
-        </div>
-      </div>
-    );
-  }
-
-  // Low credits warning (less than 10% remaining)
-  if (status.creditsBalance < (status.monthlyCredits * 0.1) && status.creditsBalance > 0) {
-    return (
-      <div className="bg-gradient-to-r from-violet-600 to-purple-600 text-white px-4 py-3">
-        <div className="container mx-auto flex items-center justify-between gap-4">
-          <div className="flex items-center gap-3">
-            <Zap className="w-5 h-5 flex-shrink-0" />
-            <p className="text-sm font-medium">
-              Running low on credits! You have {status.creditsBalance} credits remaining.
-            </p>
-          </div>
-          <div className="flex items-center gap-2">
-            <Link href="/billing">
-              <Button size="sm" variant="secondary" className="gap-1.5 bg-white text-violet-600 hover:bg-violet-50">
-                <Crown className="w-4 h-4" />
-                Get More Credits
-              </Button>
-            </Link>
-            <Button 
-              size="sm" 
-              variant="ghost" 
-              className="text-white hover:bg-white/10"
-              onClick={() => setDismissed(true)}
-            >
-              <X className="w-4 h-4" />
-            </Button>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  // Out of credits
-  if (status.creditsBalance <= 0) {
-    return (
-      <div className="bg-gradient-to-r from-red-600 to-rose-600 text-white px-4 py-3">
-        <div className="container mx-auto flex items-center justify-between gap-4">
-          <div className="flex items-center gap-3">
-            <AlertTriangle className="w-5 h-5 flex-shrink-0" />
-            <p className="text-sm font-medium">
-              You&apos;re out of credits. Upgrade to continue running analyses.
-            </p>
-          </div>
-          <Link href="/billing">
-            <Button size="sm" variant="secondary" className="gap-1.5 bg-white text-red-600 hover:bg-red-50">
-              <Crown className="w-4 h-4" />
-              Upgrade Now
-            </Button>
-          </Link>
         </div>
       </div>
     );

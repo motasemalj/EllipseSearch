@@ -3,13 +3,11 @@ import { headers } from "next/headers";
 import { createClient } from "@/lib/supabase/server";
 import { Button } from "@/components/ui/button";
 import { 
-  Coins, 
   CheckCircle2, 
   Zap, 
   Crown,
   Building2,
   ArrowRight,
-  Sparkles,
   BarChart3,
   Clock,
   AlertTriangle,
@@ -26,12 +24,11 @@ const plans = [
     name: "Starter",
     period: "/month",
     description: "Perfect for getting started",
-    credits: 2000,
     features: [
-      "2,000 monthly credits",
-      "Up to 5 brands",
-      "100 prompts per brand",
+      `Up to ${TIER_LIMITS.starter.max_brands} brands`,
+      `${TIER_LIMITS.starter.max_prompts_per_brand} prompts per brand`,
       "All AI engines",
+      "Daily analysis",
       "Basic analytics",
     ],
     icon: <Zap className="w-5 h-5" />,
@@ -42,13 +39,13 @@ const plans = [
     name: "Pro",
     period: "/month",
     description: "For growing agencies",
-    credits: 10000,
     features: [
-      "10,000 monthly credits",
-      "Up to 20 brands",
-      "500 prompts per brand",
+      `Up to ${TIER_LIMITS.pro.max_brands} brands`,
+      `${TIER_LIMITS.pro.max_prompts_per_brand} prompts per brand`,
       "All AI engines",
+      "Daily analysis",
       "Advanced analytics",
+      "Hallucination detection",
       "Priority support",
     ],
     icon: <Crown className="w-5 h-5" />,
@@ -59,12 +56,11 @@ const plans = [
     name: "Agency",
     period: "",
     description: "For large agencies",
-    credits: 50000,
     features: [
-      "50,000 monthly credits",
-      "Unlimited brands",
-      "Unlimited prompts",
+      `Up to ${TIER_LIMITS.agency.max_brands} brands`,
+      `${TIER_LIMITS.agency.max_prompts_per_brand} prompts per brand`,
       "All AI engines",
+      "Daily analysis",
       "White-label reports",
       "API access",
       "Dedicated support",
@@ -75,7 +71,7 @@ const plans = [
 ];
 
 export default async function BillingPage() {
-  const currency = getCurrencyFromHeaders(headers());
+  const currency = getCurrencyFromHeaders(await headers());
   const pricingTiers = getPricingTiers(currency);
   const plansWithPricing = plans.map((plan) => {
     const pricing = pricingTiers.find((tier) => tier.id === plan.id);
@@ -102,7 +98,6 @@ export default async function BillingPage() {
 
   const organization = profile.organizations as {
     tier: string;
-    credits_balance: number;
     stripe_subscription_status: string | null;
     stripe_customer_id: string | null;
     trial_started_at: string | null;
@@ -111,7 +106,6 @@ export default async function BillingPage() {
   };
 
   const currentTier = organization?.tier || "free";
-  const credits = organization?.credits_balance || 0;
   const subscriptionStatus = organization?.stripe_subscription_status;
   const tierLimits = TIER_LIMITS[currentTier as keyof typeof TIER_LIMITS] || TIER_LIMITS.free;
   
@@ -137,7 +131,7 @@ export default async function BillingPage() {
       <div>
         <h1 className="text-3xl font-bold tracking-tight">Billing</h1>
         <p className="text-muted-foreground mt-1">
-          Manage your subscription and credits
+          Manage your subscription and billing
         </p>
       </div>
 
@@ -209,7 +203,7 @@ export default async function BillingPage() {
             ) : trialExpired ? (
               <AlertTriangle className="w-5 h-5 text-red-500" />
             ) : (
-              <Sparkles className="w-5 h-5 text-primary" />
+              <Zap className="w-5 h-5 text-primary" />
             )}
             <span className="text-sm text-muted-foreground">Current Plan</span>
           </div>
@@ -235,20 +229,20 @@ export default async function BillingPage() {
           )}
         </div>
 
-        {/* Credits */}
+        {/* Usage */}
         <div className="rounded-2xl border border-border bg-card p-6">
           <div className="flex items-center gap-2 mb-2">
-            <Coins className="w-5 h-5 text-primary" />
-            <span className="text-sm text-muted-foreground">Credits Balance</span>
+            <Building2 className="w-5 h-5 text-primary" />
+            <span className="text-sm text-muted-foreground">Usage</span>
           </div>
-          <p className="text-2xl font-bold">{credits.toLocaleString()}</p>
+          <p className="text-2xl font-bold">{brandsCount || 0} <span className="text-sm font-normal text-muted-foreground">/ {tierLimits.max_brands === Infinity ? "∞" : tierLimits.max_brands}</span></p>
           <p className="text-xs text-muted-foreground mt-1">
-            of {tierLimits.monthly_credits.toLocaleString()} monthly
+            brands
           </p>
           <div className="mt-3 h-2 rounded-full bg-muted overflow-hidden">
             <div 
               className="h-full bg-primary rounded-full transition-all"
-              style={{ width: `${Math.min(100, (credits / tierLimits.monthly_credits) * 100)}%` }}
+              style={{ width: `${tierLimits.max_brands === Infinity ? 0 : Math.min(100, ((brandsCount || 0) / tierLimits.max_brands) * 100)}%` }}
             />
           </div>
         </div>
@@ -269,7 +263,7 @@ export default async function BillingPage() {
       {/* Quick Stats */}
       <div className="rounded-2xl border border-border bg-card p-6">
         <h2 className="font-semibold mb-4">Usage Summary</h2>
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <div className="grid grid-cols-3 gap-4">
           <div className="space-y-1">
             <p className="text-sm text-muted-foreground">Brands</p>
             <p className="text-xl font-bold">{brandsCount || 0} <span className="text-sm font-normal text-muted-foreground">/ {tierLimits.max_brands === Infinity ? "∞" : tierLimits.max_brands}</span></p>
@@ -281,10 +275,6 @@ export default async function BillingPage() {
           <div className="space-y-1">
             <p className="text-sm text-muted-foreground">Simulations</p>
             <p className="text-xl font-bold">{simulationsCount?.toLocaleString() || 0}</p>
-          </div>
-          <div className="space-y-1">
-            <p className="text-sm text-muted-foreground">Credits Used</p>
-            <p className="text-xl font-bold">{(tierLimits.monthly_credits - credits).toLocaleString()}</p>
           </div>
         </div>
       </div>
@@ -380,7 +370,7 @@ export default async function BillingPage() {
 
       {/* FAQ or Contact */}
       <div className="rounded-2xl border border-border bg-card p-6 text-center">
-        <h3 className="font-semibold mb-2">Need more credits or a custom plan?</h3>
+        <h3 className="font-semibold mb-2">Need a custom plan?</h3>
         <p className="text-sm text-muted-foreground mb-4">
           Contact our sales team for enterprise pricing and custom solutions.
         </p>

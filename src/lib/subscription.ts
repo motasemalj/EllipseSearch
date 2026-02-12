@@ -6,9 +6,6 @@ import { BillingTier, TIER_LIMITS, Organization } from "@/types";
 
 export interface SubscriptionStatus {
   tier: BillingTier;
-  creditsBalance: number;
-  creditsUsedThisPeriod: number;
-  monthlyCredits: number;
   
   // Trial info
   isTrialActive: boolean;
@@ -158,37 +155,6 @@ export function canAddPrompts(
 }
 
 /**
- * Check if user has enough credits for an operation
- */
-export function hasCredits(organization: Organization, required: number = 1): TierLimitCheck {
-  // Check for expired trial
-  if (isTrialExpired(organization)) {
-    return {
-      allowed: false,
-      currentCount: organization.credits_balance,
-      maxAllowed: 0,
-      message: "Your trial has expired. Please upgrade to continue."
-    };
-  }
-  
-  if (organization.credits_balance < required) {
-    return {
-      allowed: false,
-      currentCount: organization.credits_balance,
-      maxAllowed: required,
-      message: `Insufficient credits. Need ${required} but have ${organization.credits_balance}. Please upgrade to get more credits.`
-    };
-  }
-  
-  return {
-    allowed: true,
-    currentCount: organization.credits_balance,
-    maxAllowed: required,
-    message: "OK"
-  };
-}
-
-/**
  * Check if a feature is available for the tier
  */
 export function hasFeature(
@@ -209,7 +175,7 @@ export function hasFeature(
  */
 export function getUpgradeMessage(
   currentTier: BillingTier, 
-  blockedAction: 'brands' | 'prompts' | 'credits' | 'feature'
+  blockedAction: 'brands' | 'prompts' | 'feature'
 ): { title: string; description: string; suggestedTier: BillingTier } {
   const messages: Record<string, { title: string; description: string; suggestedTier: BillingTier }> = {
     'free-brands': {
@@ -222,24 +188,14 @@ export function getUpgradeMessage(
       description: "The free plan allows 10 prompts per brand. Upgrade to unlock up to 500 prompts per brand.",
       suggestedTier: 'starter'
     },
-    'free-credits': {
-      title: "Out of Credits",
-      description: "You've used all your free credits. Upgrade to continue running analyses.",
-      suggestedTier: 'starter'
-    },
     'trial-brands': {
       title: "Upgrade to Track More Brands",
-      description: "Your trial allows 2 brands. Upgrade to Starter for 3 brands or Pro for 10 brands.",
+      description: "Your trial allows 1 brand. Upgrade to Starter for 3 brands or Pro for 10 brands.",
       suggestedTier: 'starter'
     },
     'trial-prompts': {
       title: "Upgrade for More Prompts",
-      description: "Your trial allows 25 prompts per brand. Upgrade to unlock up to 500 prompts per brand.",
-      suggestedTier: 'starter'
-    },
-    'trial-credits': {
-      title: "Running Low on Trial Credits",
-      description: "Upgrade now to get more credits and unlock full platform features.",
+      description: "Your trial allows 5 prompts per brand. Upgrade to unlock up to 500 prompts per brand.",
       suggestedTier: 'starter'
     },
     'starter-brands': {
@@ -250,11 +206,6 @@ export function getUpgradeMessage(
     'starter-prompts': {
       title: "Upgrade for More Prompts",
       description: "The Starter plan allows 50 prompts per brand. Upgrade to Pro for 200 or Agency for 500.",
-      suggestedTier: 'pro'
-    },
-    'starter-credits': {
-      title: "Out of Monthly Credits",
-      description: "Upgrade to Pro for 10,000 monthly credits or wait for your next billing cycle.",
       suggestedTier: 'pro'
     },
     'starter-feature': {
@@ -270,11 +221,6 @@ export function getUpgradeMessage(
     'pro-prompts': {
       title: "Upgrade to Agency",
       description: "The Pro plan allows 200 prompts per brand. Upgrade to Agency for 500.",
-      suggestedTier: 'agency'
-    },
-    'pro-credits': {
-      title: "Out of Monthly Credits",
-      description: "Upgrade to Agency for 50,000 monthly credits or wait for your next billing cycle.",
       suggestedTier: 'agency'
     }
   };
@@ -314,24 +260,3 @@ export function getTierBadgeClasses(tier: BillingTier): string {
   };
   return classes[tier] || classes.free;
 }
-
-/**
- * Calculate credits needed for an analysis
- */
-export function calculateCreditsNeeded(
-  promptCount: number, 
-  engineCount: number, 
-  mode: 'api' | 'browser' | 'hybrid' = 'api'
-): number {
-  const baseCredits = promptCount * engineCount;
-  
-  switch (mode) {
-    case 'browser':
-      return baseCredits * 2; // Browser mode costs 2x
-    case 'hybrid':
-      return baseCredits * 3; // Hybrid mode costs 3x
-    default:
-      return baseCredits;
-  }
-}
-

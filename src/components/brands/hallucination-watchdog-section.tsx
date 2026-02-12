@@ -14,7 +14,7 @@ import {
   ExternalLink,
   Crown,
   Lock,
-  Sparkles,
+  Zap,
 } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -202,7 +202,7 @@ export function HallucinationWatchdogSection({ data, brandId, userTier }: Halluc
           {/* Value Proposition */}
           <div className="p-4 rounded-xl bg-gradient-to-r from-amber-500/10 to-orange-500/10 border border-amber-500/20">
             <h4 className="font-semibold text-amber-600 dark:text-amber-400 mb-2 flex items-center gap-2">
-              <Sparkles className="w-4 h-4" />
+              <Zap className="w-4 h-4" />
               Don&apos;t just track if AI talks about you. Track what it says.
             </h4>
             <p className="text-sm text-muted-foreground">

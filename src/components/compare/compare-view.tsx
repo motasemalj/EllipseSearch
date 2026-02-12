@@ -26,7 +26,7 @@ import {
   Layers,
   MessageSquare,
   Info,
-  Sparkles,
+  Zap,
   Grid3X3,
   Eye,
 } from "lucide-react";
@@ -344,7 +344,7 @@ export function CompareView({ payload }: { payload: ComparePayload }) {
             <Card className="p-12">
               <div className="text-center space-y-3">
                 <div className="w-12 h-12 rounded-full bg-muted flex items-center justify-center mx-auto">
-                  <Sparkles className="w-6 h-6 text-muted-foreground" />
+                  <Zap className="w-6 h-6 text-muted-foreground" />
                 </div>
                 <h3 className="font-semibold text-lg">No analysis data yet</h3>
                 <p className="text-sm text-muted-foreground max-w-md mx-auto">

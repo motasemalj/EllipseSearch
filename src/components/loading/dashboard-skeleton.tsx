@@ -236,3 +236,182 @@ export function BrandPageSkeleton() {
   );
 }
 
+// =============================================================================
+// PROMPT ROW SKELETON
+// =============================================================================
+
+export function PromptRowSkeleton() {
+  return (
+    <div className="rounded-xl border border-border bg-card p-4 flex items-center gap-4">
+      {/* Toggle */}
+      <Skeleton className="h-6 w-10 rounded-full shrink-0" />
+      {/* Text area */}
+      <div className="flex-1 space-y-2">
+        <Skeleton className="h-4 w-3/4" />
+        <Skeleton className="h-3 w-1/2" />
+      </div>
+      {/* Actions */}
+      <div className="flex items-center gap-2 shrink-0">
+        <Skeleton className="h-8 w-8 rounded-md" />
+        <Skeleton className="h-8 w-8 rounded-md" />
+      </div>
+    </div>
+  );
+}
+
+// =============================================================================
+// PROMPTS PAGE SKELETON
+// =============================================================================
+
+export function PromptsPageSkeleton() {
+  return (
+    <div className="space-y-6 animate-in fade-in duration-300">
+      {/* Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+        <div className="space-y-2">
+          <Skeleton className="h-9 w-32" />
+          <Skeleton className="h-4 w-56" />
+        </div>
+        <Skeleton className="h-10 w-32" />
+      </div>
+
+      {/* Metric cards */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        <MetricCardSkeleton />
+        <MetricCardSkeleton />
+        <MetricCardSkeleton />
+        <MetricCardSkeleton />
+      </div>
+
+      {/* Search bar */}
+      <Skeleton className="h-10 w-full max-w-md" />
+
+      {/* Prompt rows */}
+      <div className="space-y-3">
+        <PromptRowSkeleton />
+        <PromptRowSkeleton />
+        <PromptRowSkeleton />
+      </div>
+    </div>
+  );
+}
+
+// =============================================================================
+// ACTIVITY PAGE SKELETON
+// =============================================================================
+
+export function ActivityPageSkeleton() {
+  return (
+    <div className="space-y-6 animate-in fade-in duration-300">
+      {/* Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+        <div className="space-y-2">
+          <Skeleton className="h-9 w-28" />
+          <Skeleton className="h-4 w-52" />
+        </div>
+      </div>
+
+      {/* Metric cards */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        <MetricCardSkeleton />
+        <MetricCardSkeleton />
+        <MetricCardSkeleton />
+        <MetricCardSkeleton />
+      </div>
+
+      {/* Activity rows */}
+      <div className="rounded-2xl border border-border bg-card divide-y divide-border">
+        {Array.from({ length: 5 }).map((_, i) => (
+          <div key={i} className="flex items-center justify-between p-4">
+            <div className="flex items-center gap-3">
+              <Skeleton className="h-8 w-8 rounded-full" />
+              <div className="space-y-2">
+                <Skeleton className="h-4 w-40" />
+                <Skeleton className="h-3 w-24" />
+              </div>
+            </div>
+            <Skeleton className="h-6 w-20 rounded-full" />
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// =============================================================================
+// ANALYTICS PAGE SKELETON
+// =============================================================================
+
+export function AnalyticsPageSkeleton() {
+  return (
+    <div className="space-y-6 animate-in fade-in duration-300">
+      {/* Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+        <div className="space-y-2">
+          <Skeleton className="h-9 w-32" />
+          <Skeleton className="h-4 w-56" />
+        </div>
+      </div>
+
+      {/* Metric cards */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        <MetricCardSkeleton />
+        <MetricCardSkeleton />
+        <MetricCardSkeleton />
+        <MetricCardSkeleton />
+      </div>
+
+      {/* 2x2 Chart grid */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <ChartCardSkeleton />
+        <ChartCardSkeleton />
+        <ChartCardSkeleton />
+        <ChartCardSkeleton />
+      </div>
+    </div>
+  );
+}
+
+// =============================================================================
+// CITATIONS PAGE SKELETON
+// =============================================================================
+
+export function CitationsPageSkeleton() {
+  return (
+    <div className="space-y-6 animate-in fade-in duration-300">
+      {/* Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+        <div className="space-y-2">
+          <Skeleton className="h-9 w-28" />
+          <Skeleton className="h-4 w-52" />
+        </div>
+      </div>
+
+      {/* Metric cards */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <MetricCardSkeleton />
+        <MetricCardSkeleton />
+      </div>
+
+      {/* Citation rows */}
+      <div className="rounded-2xl border border-border bg-card divide-y divide-border">
+        {Array.from({ length: 6 }).map((_, i) => (
+          <div key={i} className="flex items-center justify-between p-4">
+            <div className="flex items-center gap-3 flex-1">
+              <Skeleton className="h-8 w-8 rounded-md shrink-0" />
+              <div className="space-y-2 flex-1">
+                <Skeleton className="h-4 w-3/5" />
+                <Skeleton className="h-3 w-2/5" />
+              </div>
+            </div>
+            <div className="flex items-center gap-3 shrink-0">
+              <Skeleton className="h-6 w-16 rounded-full" />
+              <Skeleton className="h-4 w-4" />
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+

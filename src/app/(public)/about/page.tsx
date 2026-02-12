@@ -3,7 +3,7 @@ import Image from "next/image";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { Target, Sparkles, ShieldCheck, Globe2 } from "lucide-react";
+import { Target, Lightbulb, ShieldCheck, Globe2 } from "lucide-react";
 
 const pillars = [
   {
@@ -22,7 +22,7 @@ const pillars = [
     title: "Improve",
     description:
       "Turn insights into precise content and technical fixes that change AI outcomes.",
-    icon: Sparkles,
+    icon: Lightbulb,
   },
 ];
 

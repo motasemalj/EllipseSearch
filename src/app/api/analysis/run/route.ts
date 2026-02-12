@@ -171,14 +171,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Check credits
     const organization = brand.organizations;
-    if (organization.credits_balance <= 0) {
-      return NextResponse.json(
-        { error: "Insufficient credits. Please upgrade your plan." },
-        { status: 402 }
-      );
-    }
 
     // Enforce hallucination detection policy:
     // - Pro/Agency: always enabled
@@ -200,15 +193,6 @@ export async function POST(request: NextRequest) {
     }
 
     const totalSimulations = promptCount * engines.length;
-
-    if (organization.credits_balance < totalSimulations) {
-      return NextResponse.json(
-        {
-          error: `Insufficient credits. Need ${totalSimulations} but have ${organization.credits_balance}`,
-        },
-        { status: 402 }
-      );
-    }
 
     // Create the batch record first
     // When running individual prompt analysis (single prompt_id), set prompt_id on the batch

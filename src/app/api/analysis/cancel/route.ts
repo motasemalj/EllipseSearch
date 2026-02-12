@@ -85,33 +85,9 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Refund credits for incomplete simulations
-    const completedSimulations = batch.completed_simulations || 0;
-    const totalSimulations = batch.total_simulations || 0;
-    const refundCredits = totalSimulations - completedSimulations;
-
-    if (refundCredits > 0) {
-      // Get current credits balance
-      const { data: org } = await supabase
-        .from("organizations")
-        .select("credits_balance")
-        .eq("id", profile.organization_id)
-        .single();
-
-      if (org) {
-        await supabase
-          .from("organizations")
-          .update({ 
-            credits_balance: (org.credits_balance || 0) + refundCredits 
-          })
-          .eq("id", profile.organization_id);
-      }
-    }
-
     return NextResponse.json({
       success: true,
       message: "Analysis cancelled",
-      refunded_credits: refundCredits,
     });
   } catch (error) {
     console.error("Cancel analysis error:", error);

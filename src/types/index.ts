@@ -209,7 +209,6 @@ export interface Organization {
   id: string;
   name: string;
   tier: BillingTier;
-  credits_balance: number;
   stripe_customer_id: string | null;
   stripe_subscription_id: string | null;
   stripe_subscription_status: string | null;
@@ -931,7 +930,6 @@ export interface CrawlBrandInput {
 // ===========================================
 
 export interface TierLimits {
-  monthly_credits: number;
   max_brands: number;
   max_prompts_per_brand: number;
   max_concurrent_jobs: number;
@@ -943,7 +941,6 @@ export interface TierLimits {
 
 export const TIER_LIMITS: Record<BillingTier, TierLimits> = {
   free: {
-    monthly_credits: 50,
     max_brands: 1,
     max_prompts_per_brand: 10,
     max_concurrent_jobs: 2,
@@ -951,15 +948,13 @@ export const TIER_LIMITS: Record<BillingTier, TierLimits> = {
     website_crawling: false,
   },
   trial: {
-    monthly_credits: 200,
-    max_brands: 2,
-    max_prompts_per_brand: 25,
+    max_brands: 1,
+    max_prompts_per_brand: 5,
     max_concurrent_jobs: 3,
     hallucination_watchdog: false,
     website_crawling: false,
   },
   starter: {
-    monthly_credits: 2000,
     max_brands: 3,
     max_prompts_per_brand: 50,
     max_concurrent_jobs: 5,
@@ -967,7 +962,6 @@ export const TIER_LIMITS: Record<BillingTier, TierLimits> = {
     website_crawling: true,
   },
   pro: {
-    monthly_credits: 10000,
     max_brands: 10,
     max_prompts_per_brand: 200,
     max_concurrent_jobs: 10,
@@ -975,7 +969,6 @@ export const TIER_LIMITS: Record<BillingTier, TierLimits> = {
     website_crawling: true,
   },
   agency: {
-    monthly_credits: 50000,
     max_brands: 50,
     max_prompts_per_brand: 500,
     max_concurrent_jobs: 20,

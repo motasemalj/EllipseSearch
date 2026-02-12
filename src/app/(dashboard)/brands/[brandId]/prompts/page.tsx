@@ -21,11 +21,12 @@ import {
   Folder,
   ChevronDown,
   Globe,
-  Sparkles,
+  Zap,
   X,
 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+import { PromptsPageSkeleton } from "@/components/loading/dashboard-skeleton";
 import {
   Dialog,
   DialogContent,
@@ -242,7 +243,23 @@ export default function BrandPromptsPage() {
 
       const addedCount = promptsToAdd.length;
       
-      // Reset state first
+      // Optimistic: add prompts to local state immediately
+      if (insertedPrompts) {
+        const optimisticPrompts: Prompt[] = insertedPrompts.map((p: { id: string; text?: string; created_at?: string }) => ({
+          id: p.id,
+          text: p.text || "",
+          created_at: p.created_at || new Date().toISOString(),
+          prompt_set_id: setId,
+          is_active: true,
+          analysis_regions: ["ae"] as SupportedRegion[],
+          total_simulations: 0,
+          visible_simulations: 0,
+          last_analyzed_at: null,
+        }));
+        setPrompts(prev => [...optimisticPrompts, ...prev]);
+      }
+      
+      // Reset dialog state
       setIsAddDialogOpen(false);
       setPromptsToAdd([]);
       setNewPromptInput("");
@@ -336,14 +353,20 @@ export default function BrandPromptsPage() {
   async function handleDeletePrompt() {
     if (!deletePromptId) return;
 
-    setIsDeleting(true);
-    const supabase = createClient();
-
-    await supabase.from("prompts").delete().eq("id", deletePromptId);
-
+    const idToDelete = deletePromptId;
+    
+    // Optimistic: remove from UI immediately
+    setPrompts(prev => prev.filter(p => p.id !== idToDelete));
     setDeletePromptId(null);
     setIsDeleting(false);
-    fetchData();
+
+    const supabase = createClient();
+    const { error } = await supabase.from("prompts").delete().eq("id", idToDelete);
+    
+    if (error) {
+      toast.error("Failed to delete prompt");
+      fetchData(); // Revert by refetching
+    }
   }
 
   async function handleToggleActive(promptId: string, isActive: boolean) {
@@ -409,11 +432,7 @@ export default function BrandPromptsPage() {
     : 0;
 
   if (isLoading) {
-    return (
-      <div className="flex items-center justify-center py-12">
-        <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
-      </div>
-    );
+    return <PromptsPageSkeleton />;
   }
 
   return (
@@ -436,7 +455,7 @@ export default function BrandPromptsPage() {
           <DialogContent className="sm:max-w-lg">
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
-                <Sparkles className="w-5 h-5 text-primary" />
+                <Zap className="w-5 h-5 text-primary" />
                 Add Prompts
               </DialogTitle>
               <DialogDescription>
@@ -562,7 +581,7 @@ export default function BrandPromptsPage() {
                 <div className="space-y-0.5">
                   <Label className="text-sm font-medium">Run analysis immediately</Label>
                   <p className="text-xs text-muted-foreground">
-                    Analyze new prompts across all AI engines (~{promptsToAdd.length * 4} credits)
+                    Analyze new prompts across all AI engines right away
                   </p>
                 </div>
                 <Switch

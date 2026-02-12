@@ -9,7 +9,7 @@ import {
   FileJson, 
   ChevronDown, 
   ChevronUp,
-  Sparkles,
+  Lightbulb,
   AlertTriangle,
 } from "lucide-react";
 import type { SchemaFix, DetectedHallucination } from "@/types";
@@ -102,7 +102,7 @@ export function SchemaFixPanel({ hallucination, schemaFix, brandName }: SchemaFi
       {/* Recommendation */}
       <div className="px-4 py-3 bg-muted/30 border-b border-border/50">
         <div className="flex items-start gap-2">
-          <Sparkles className="w-4 h-4 text-primary mt-0.5 shrink-0" />
+          <Lightbulb className="w-4 h-4 text-primary mt-0.5 shrink-0" />
           <div>
             <p className="text-sm font-medium">{hallucination.recommendation.title}</p>
             <p className="text-sm text-muted-foreground">{hallucination.recommendation.description}</p>
