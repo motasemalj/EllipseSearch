@@ -9,7 +9,7 @@ import {
   Search,
   ArrowRight,
   Zap,
-  Bot,
+  Cpu,
   Activity,
   Building2,
   BarChart3,
@@ -112,7 +112,7 @@ export default async function DashboardPage() {
         <div className="metric-card">
           <div className="flex items-center gap-3">
             <div className="p-2 rounded-lg bg-success/10">
-              <Bot className="w-4 h-4 text-success" />
+              <Cpu className="w-4 h-4 text-success" />
             </div>
             <div>
               <p className="data-label">Active Engines</p>
