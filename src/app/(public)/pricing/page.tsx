@@ -5,8 +5,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Check, Crown } from "lucide-react";
 import { TIER_LIMITS } from "@/types";
-import { DirhamSymbol } from "@/components/ui/dirham-symbol";
-import { formatCurrencyAmount, getCurrencyFromHeaders, getPricingTiers } from "@/lib/pricing";
+import { getCurrencyFromHeaders } from "@/lib/pricing";
+import { PriceDisplay } from "@/components/ui/price-display";
 
 const plans = [
   {
@@ -89,19 +89,20 @@ const faqs = [
   },
 ];
 
-export default async function PricingPage() {
-  const currency = getCurrencyFromHeaders(await headers());
-  const pricingTiers = getPricingTiers(currency);
+// All prices by currency for client-side detection
+const ALL_PRICES: Record<string, Record<"USD" | "AED" | "SAR", number>> = {
+  starter: { USD: 70, AED: 250, SAR: 260 },
+  pro: { USD: 300, AED: 1100, SAR: 1200 },
+};
 
-  const plansWithPricing = plans.map((plan) => {
-    const pricing = pricingTiers.find((tier) => tier.id === plan.id);
-    return {
-      ...plan,
-      price: pricing?.price ?? null,
-      currency: pricing?.currency ?? "USD",
-      isCustom: pricing?.isCustom ?? false,
-    };
-  });
+export default async function PricingPage() {
+  // Server-side currency detection (works when geo headers or cookie available)
+  const serverCurrency = getCurrencyFromHeaders(await headers());
+
+  const plansWithPricing = plans.map((plan) => ({
+    ...plan,
+    isCustom: plan.id === "agency",
+  }));
 
   return (
     <div className="py-20">
@@ -149,21 +150,12 @@ export default async function PricingPage() {
                 <CardContent>
                   <div className="text-center mb-6">
                     <div className="flex items-baseline justify-center gap-1">
-                      {plan.isCustom ? (
-                        <span className="text-4xl font-bold">Custom</span>
-                      ) : (
-                        <>
-                          <span className="text-4xl font-bold flex items-center gap-1">
-                            {plan.currency === "AED" ? (
-                              <DirhamSymbol size="lg" />
-                            ) : (
-                              <span>{plan.currency === "SAR" ? "SAR" : "$"}</span>
-                            )}
-                            {formatCurrencyAmount(plan.price ?? 0)}
-                          </span>
-                          <span className="text-muted-foreground">/{plan.period}</span>
-                        </>
-                      )}
+                      <PriceDisplay
+                        prices={ALL_PRICES[plan.id] || { USD: 0, AED: 0, SAR: 0 }}
+                        serverCurrency={serverCurrency}
+                        period={plan.isCustom ? undefined : `/${plan.period}`}
+                        isCustom={plan.isCustom}
+                      />
                     </div>
                   </div>
 

@@ -65,6 +65,14 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" suppressHydrationWarning>
+      <head>
+        {/* Detect user country from timezone for pricing - runs before React hydration */}
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `(function(){try{if(document.cookie.indexOf('user-country=')!==-1)return;var tz=Intl.DateTimeFormat().resolvedOptions().timeZone;var m={'Asia/Dubai':'AE','Asia/Muscat':'AE','Asia/Riyadh':'SA','Asia/Bahrain':'BH','Asia/Qatar':'QA','Asia/Kuwait':'KW','Africa/Cairo':'EG'};var c=m[tz];if(c)document.cookie='user-country='+c+';path=/;max-age=2592000;SameSite=Lax';}catch(e){}})();`,
+          }}
+        />
+      </head>
       <body className={`${geistSans.variable} ${geistMono.variable} font-sans antialiased`}>
         <ThemeProvider>
           {children}

@@ -14,8 +14,8 @@ import {
 } from "lucide-react";
 import { BillingActions } from "@/components/billing/billing-actions";
 import { BillingTier, TIER_LIMITS } from "@/types";
-import { DirhamSymbol } from "@/components/ui/dirham-symbol";
-import { formatCurrencyAmount, getCurrencyFromHeaders, getPricingTiers } from "@/lib/pricing";
+import { getCurrencyFromHeaders } from "@/lib/pricing";
+import { PriceDisplay } from "@/components/ui/price-display";
 import { isTrialExpired, getTrialDaysRemaining } from "@/lib/subscription";
 
 const plans = [
@@ -70,18 +70,18 @@ const plans = [
   },
 ];
 
+// All prices by currency for client-side detection
+const ALL_PRICES: Record<string, Record<"USD" | "AED" | "SAR", number>> = {
+  starter: { USD: 70, AED: 250, SAR: 260 },
+  pro: { USD: 300, AED: 1100, SAR: 1200 },
+};
+
 export default async function BillingPage() {
-  const currency = getCurrencyFromHeaders(await headers());
-  const pricingTiers = getPricingTiers(currency);
-  const plansWithPricing = plans.map((plan) => {
-    const pricing = pricingTiers.find((tier) => tier.id === plan.id);
-    return {
-      ...plan,
-      price: pricing?.price ?? null,
-      currency: pricing?.currency ?? "USD",
-      isCustom: pricing?.isCustom ?? false,
-    };
-  });
+  const serverCurrency = getCurrencyFromHeaders(await headers());
+  const plansWithPricing = plans.map((plan) => ({
+    ...plan,
+    isCustom: plan.id === "agency",
+  }));
 
   const supabase = await createClient();
 
@@ -316,22 +316,14 @@ export default async function BillingPage() {
                   </div>
                 </div>
 
-                <div className="mb-6">
-                  {plan.isCustom ? (
-                    <span className="text-3xl font-bold">Custom</span>
-                  ) : (
-                    <>
-                      <span className="text-3xl font-bold inline-flex items-center gap-1">
-                        {plan.currency === "AED" ? (
-                          <DirhamSymbol size="lg" />
-                        ) : (
-                          <span>{plan.currency === "SAR" ? "SAR" : "$"}</span>
-                        )}
-                        {formatCurrencyAmount(plan.price ?? 0)}
-                      </span>
-                      <span className="text-muted-foreground">{plan.period}</span>
-                    </>
-                  )}
+                <div className="mb-6 flex items-baseline gap-1">
+                  <PriceDisplay
+                    prices={ALL_PRICES[plan.id] || { USD: 0, AED: 0, SAR: 0 }}
+                    serverCurrency={serverCurrency}
+                    period={plan.isCustom ? undefined : plan.period}
+                    isCustom={plan.isCustom}
+                    className="text-3xl font-bold inline-flex items-center gap-1"
+                  />
                 </div>
 
                 <ul className="space-y-3 mb-6">

@@ -20,6 +20,7 @@ import {
   CHATGPT_SIM_ENABLE_WEB_SEARCH, 
   OPENAI_CHATGPT_SIM_MODEL,
   CHATGPT_SIM_MODE,
+  CHATGPT_SIMULATION_REASONING_EFFORT,
   ENABLE_SIMULATION_CACHE,
   SIMULATION_CACHE_TTL_MS,
   SIMULATION_CACHE_MAX_SIZE,
@@ -149,10 +150,9 @@ async function runChatGPTSimulation(
     input: inputQuery,
     instructions: `You are ChatGPT. Answer naturally and helpfully.${langInstruction}${regionInstruction}\n\n${UNTRUSTED_CONTENT_POLICY}`,
     // Deep research models only support "medium" reasoning effort
-    // For other models: use "low" reasoning to leave max tokens for the actual response
-    reasoning: { effort: isDeepResearchModel ? "medium" : "low" },
-    text: { verbosity: "medium" },
-    max_output_tokens: 16000, // Large budget for high search context + full response
+    // For gpt-5-nano: use the configured reasoning effort (default "medium")
+    reasoning: { effort: isDeepResearchModel ? "medium" : CHATGPT_SIMULATION_REASONING_EFFORT },
+    max_output_tokens: isDeepResearchModel ? 16000 : 8192,
   };
 
   if (CHATGPT_SIM_ENABLE_WEB_SEARCH) {
